@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { DocKind } from './types';
+import { Icon } from './components/Icon';
 import Home from './screens/Home';
 import Chat from './screens/Chat';
 import Docs from './screens/Docs';
@@ -9,14 +10,26 @@ import Settings from './screens/Settings';
 
 type Tab = 'home' | 'chat' | 'docs' | 'sheets' | 'slides' | 'settings';
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: 'home', label: 'Home' },
-  { id: 'chat', label: 'Chat' },
-  { id: 'docs', label: 'Docs' },
-  { id: 'sheets', label: 'Sheets' },
-  { id: 'slides', label: 'Slides' },
-  { id: 'settings', label: 'Settings' },
+const TABS: { id: Tab; label: string; icon: string }[] = [
+  { id: 'home', label: 'Home', icon: 'home' },
+  { id: 'docs', label: 'Docs', icon: 'fileText' },
+  { id: 'sheets', label: 'Sheets', icon: 'grid' },
+  { id: 'slides', label: 'Slides', icon: 'monitor' },
+  { id: 'chat', label: 'AI', icon: 'chat' },
+  { id: 'settings', label: 'Settings', icon: 'settings' },
 ];
+
+/** Office brand accent per tab (Word blue / Excel green / PPT orange / Teams purple). */
+const ACCENT: Record<Tab, string> = {
+  home: '#0F6CBD',
+  docs: '#185ABD',
+  sheets: '#107C41',
+  slides: '#C43E1C',
+  chat: '#5B5FC7',
+  settings: '#0F6CBD',
+};
+
+const EDITOR_TABS: Tab[] = ['docs', 'sheets', 'slides'];
 
 const TAB_FOR_KIND: Record<DocKind, Tab> = {
   chat: 'chat',
@@ -35,24 +48,29 @@ export default function App() {
   };
 
   const keyFor = (kind: DocKind): string => (target?.kind === kind ? target.id : 'new');
+  const isEditor = EDITOR_TABS.includes(tab);
+  const exit = () => setTab('home');
 
   return (
-    <div className="app">
-      <main className="screen-area">
+    <div className="app" style={{ ['--accent' as string]: ACCENT[tab] }}>
+      <main className={isEditor ? 'screen-area flush' : 'screen-area'}>
         {tab === 'home' && <Home onOpen={openDoc} onGo={setTab} key="home" />}
         {tab === 'chat' && <Chat initialId={target?.kind === 'chat' ? target.id : undefined} key={keyFor('chat')} />}
-        {tab === 'docs' && <Docs initialId={target?.kind === 'doc' ? target.id : undefined} key={keyFor('doc')} />}
-        {tab === 'sheets' && <Sheets initialId={target?.kind === 'sheet' ? target.id : undefined} key={keyFor('sheet')} />}
-        {tab === 'slides' && <Slides initialId={target?.kind === 'deck' ? target.id : undefined} key={keyFor('deck')} />}
+        {tab === 'docs' && <Docs initialId={target?.kind === 'doc' ? target.id : undefined} key={keyFor('doc')} onExit={exit} />}
+        {tab === 'sheets' && <Sheets initialId={target?.kind === 'sheet' ? target.id : undefined} key={keyFor('sheet')} onExit={exit} />}
+        {tab === 'slides' && <Slides initialId={target?.kind === 'deck' ? target.id : undefined} key={keyFor('deck')} onExit={exit} />}
         {tab === 'settings' && <Settings key="settings" />}
       </main>
-      <nav className="tabbar">
-        {TABS.map((t) => (
-          <button key={t.id} className={tab === t.id ? 'tab active' : 'tab'} onClick={() => setTab(t.id)}>
-            {t.label}
-          </button>
-        ))}
-      </nav>
+      {!isEditor && (
+        <nav className="tabbar">
+          {TABS.map((t) => (
+            <button key={t.id} className={tab === t.id ? 'tab active' : 'tab'} onClick={() => setTab(t.id)}>
+              <Icon name={t.icon} size={21} strokeWidth={tab === t.id ? 2.3 : 2} />
+              <span>{t.label}</span>
+            </button>
+          ))}
+        </nav>
+      )}
     </div>
   );
 }

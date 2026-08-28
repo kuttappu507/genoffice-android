@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
+import { Icon, FileTypeIcon } from '../components/Icon';
 import { evalCell } from '../lib/formulas';
 import { chatStream, errMsg } from '../lib/ai-client';
 import { exportXlsx, importSpreadsheet, openFilePicker, saveBinary, sanitizeName } from '../lib/fileio';
@@ -15,7 +16,7 @@ function colName(i: number): string {
   return String.fromCharCode(65 + i);
 }
 
-export default function Sheets({ initialId }: { initialId?: string }) {
+export default function Sheets({ initialId, onExit }: { initialId?: string; onExit?: () => void }) {
   const sheetId = useRef(initialId ?? uid()).current;
   const [title, setTitle] = useState(initialId ? 'Spreadsheet' : 'Untitled sheet');
   const [cells, setCells] = useState<Record<string, string>>(() => {
@@ -27,6 +28,7 @@ export default function Sheets({ initialId }: { initialId?: string }) {
   const [aiOpen, setAiOpen] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
+  const [menu, setMenu] = useState(false);
   const [toast, setToast] = useState('');
 
   const save = useMemo(
@@ -52,12 +54,12 @@ export default function Sheets({ initialId }: { initialId?: string }) {
     setEditing(cells[ref] ?? '');
   };
 
-  const commitAndMove = () => {
+  const commitAndMove = (dc: number, dr: number) => {
     if (editing !== null) commit(sel, editing);
-    const col = sel.charCodeAt(0);
-    const row = parseInt(sel.slice(1), 10);
-    if (row < ROWS) {
-      const next = `${String.fromCharCode(col)}${row + 1}`;
+    const col = sel.charCodeAt(0) - 65 + dc;
+    const row = parseInt(sel.slice(1), 10) + dr;
+    if (col >= 0 && col < COLS && row >= 1 && row <= ROWS) {
+      const next = `${colName(col)}${row}`;
       setSel(next);
       setEditing(cells[next] ?? '');
     }
@@ -66,14 +68,13 @@ export default function Sheets({ initialId }: { initialId?: string }) {
   const runAi = async () => {
     const s = getSettings();
     if (!s.apiKey) {
-      setToast('Add your API key in Settings first.');
+      flash('Add your API key in Settings first.');
       setAiOpen(false);
       return;
     }
     const topic = aiPrompt.trim();
     if (!topic) return;
     setAiBusy(true);
-    setToast('');
     try {
       const out = await chatStream(s, [
         {
@@ -98,15 +99,16 @@ export default function Sheets({ initialId }: { initialId?: string }) {
       setCells(next);
       save(next, title);
       setAiOpen(false);
-      setToast(`Imported ${Math.min(lines.length, ROWS)} rows starting at A1.`);
+      flash(`Imported ${Math.min(lines.length, ROWS)} rows starting at A1.`);
     } catch (e) {
-      setToast(`Error: ${errMsg(e)}`);
+      flash(`Error: ${errMsg(e)}`);
     } finally {
       setAiBusy(false);
     }
   };
 
   const openFile = async () => {
+    setMenu(false);
     const pick = await openFilePicker('.xlsx,.xls,.csv');
     if (!pick) return;
     try {
@@ -114,13 +116,12 @@ export default function Sheets({ initialId }: { initialId?: string }) {
       setCells(loaded);
       setSel('A1');
       setEditing(loaded['A1'] ?? '');
-      setTitle(pick.name.replace(/\.[^.]+$/, ''));
-      save(loaded, pick.name.replace(/\.[^.]+$/, ''));
-      setToast(`Opened ${pick.name} (${Object.keys(loaded).length} cells)`);
-      setTimeout(() => setToast(''), 3500);
+      const t = pick.name.replace(/\.[^.]+$/, '');
+      setTitle(t);
+      save(loaded, t);
+      flash(`Opened ${pick.name} (${Object.keys(loaded).length} cells)`);
     } catch (e) {
-      setToast(`Could not open: ${errMsg(e)}`);
-      setTimeout(() => setToast(''), 3500);
+      flash(`Could not open: ${errMsg(e)}`);
     }
   };
 
@@ -128,15 +129,14 @@ export default function Sheets({ initialId }: { initialId?: string }) {
     try {
       const bytes = await exportXlsx(title, cells);
       await saveBinary(sanitizeName(title, 'xlsx'), bytes, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-      setToast('Workbook saved');
-      setTimeout(() => setToast(''), 3000);
+      flash('Workbook saved');
     } catch (e) {
-      setToast(`Save failed: ${errMsg(e)}`);
-      setTimeout(() => setToast(''), 3500);
+      flash(`Save failed: ${errMsg(e)}`);
     }
   };
 
   const exportCsv = () => {
+    setMenu(false);
     let maxRow = 0;
     let maxCol = 0;
     for (const k of Object.keys(cells)) {
@@ -156,13 +156,16 @@ export default function Sheets({ initialId }: { initialId?: string }) {
       }
       rows.push(cols.join(','));
     }
-    void downloadText(`${title.replace(/[^\w-]+/g, '_') || 'sheet'}.csv`, rows.join('\n'), 'text/csv').then(setToast);
+    void downloadText(`${title.replace(/[^\w-]+/g, '_') || 'sheet'}.csv`, rows.join('\n'), 'text/csv').then(flash);
   };
 
   const flash = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(''), 3000);
   };
+
+  const selCol = sel.charCodeAt(0) - 65;
+  const selRow = parseInt(sel.slice(1), 10);
 
   const rows = [];
   for (let r = 1; r <= ROWS; r++) {
@@ -182,17 +185,21 @@ export default function Sheets({ initialId }: { initialId?: string }) {
     }
     rows.push(
       <div className="sheet-row" key={r}>
-        <div className="cell head">{r}</div>
+        <div className={`cell head rowhead${r === selRow ? ' hitsel' : ''}`}>{r}</div>
         {cols}
       </div>,
     );
   }
 
   return (
-    <div className="screen sheet-screen">
-      <header className="screen-head">
+    <div className="edscreen" style={{ ['--app' as string]: 'var(--excel)' }}>
+      <header className="appbar">
+        <button className="icon-btn light" aria-label="Back to Home" onClick={onExit}>
+          <Icon name="arrowLeft" size={21} />
+        </button>
+        <FileTypeIcon kind="sheet" size={26} />
         <input
-          className="title-input"
+          className="appbar-title"
           value={title}
           onChange={(e) => {
             setTitle(e.target.value);
@@ -200,25 +207,61 @@ export default function Sheets({ initialId }: { initialId?: string }) {
           }}
           placeholder="Sheet title"
         />
-        <button className="btn small" onClick={() => setAiOpen(true)}>
-          AI Fill
+        <button className="icon-btn light" aria-label="Save as .xlsx" onClick={() => void saveXlsx()}>
+          <Icon name="save" size={20} />
         </button>
-        <button className="btn small" onClick={() => void openFile()}>
-          Open
-        </button>
-        <button className="btn small primary" onClick={() => void saveXlsx()}>
-          Xlsx
-        </button>
-        <button className="btn small" onClick={exportCsv}>
-          CSV
-        </button>
+        <div className="menu-wrap">
+          <button className="icon-btn light" aria-label="More actions" onClick={() => setMenu(!menu)}>
+            <Icon name="more" size={20} />
+          </button>
+          {menu && (
+            <>
+              <div className="menu-backdrop" onClick={() => setMenu(false)} />
+              <div className="menu">
+                <button className="menu-item" onClick={() => void openFile()}>
+                  <Icon name="folder" size={18} /> Open .xlsx / .csv
+                </button>
+                <button className="menu-item" onClick={() => { setMenu(false); setAiOpen(true); }}>
+                  <Icon name="sparkle" size={18} /> AI Fill
+                </button>
+                <button className="menu-item" onClick={exportCsv}>
+                  <Icon name="download" size={18} /> Export CSV
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </header>
+
+      <div className="formula-bar">
+        <span className="namebox">{sel}</span>
+        <span className="fx">
+          <Icon name="fx" size={18} />
+        </span>
+        <input
+          key={sel}
+          className="fx-input"
+          value={editing ?? ''}
+          placeholder="Value or =A1+B2, =SUM(A1:A9)"
+          onChange={(e) => setEditing(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commitAndMove(0, 1);
+            if (e.key === 'Tab') {
+              e.preventDefault();
+              commitAndMove(1, 0);
+            }
+          }}
+          onBlur={() => {
+            if (editing !== null) commit(sel, editing);
+          }}
+        />
+      </div>
 
       <div className="sheet-grid">
         <div className="sheet-row">
           <div className="cell head corner" />
           {Array.from({ length: COLS }, (_, c) => (
-            <div key={c} className="cell head">
+            <div key={c} className={`cell head colhead${c === selCol ? ' hitsel' : ''}`}>
               {colName(c)}
             </div>
           ))}
@@ -226,21 +269,15 @@ export default function Sheets({ initialId }: { initialId?: string }) {
         {rows}
       </div>
 
-      <div className="formula-bar">
-        <span className="formula-ref">{sel}</span>
-        <input
-          key={sel}
-          className="input"
-          value={editing ?? ''}
-          placeholder="Value or =A1+B2*2, =SUM(A1:A9)"
-          onChange={(e) => setEditing(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') commitAndMove();
-          }}
-          onBlur={() => {
-            if (editing !== null) commit(sel, editing);
-          }}
-        />
+      <div className="sheet-tabs">
+        <button className="stab active">Sheet1</button>
+        <button
+          className="stab-add"
+          aria-label="Add sheet"
+          onClick={() => flash('Multiple sheets are coming in a future update.')}
+        >
+          <Icon name="plus" size={16} />
+        </button>
       </div>
 
       {aiOpen && (
@@ -257,7 +294,7 @@ export default function Sheets({ initialId }: { initialId?: string }) {
             />
             <div className="btn-row">
               <button className="btn primary" disabled={aiBusy || !aiPrompt.trim()} onClick={() => void runAi()}>
-                {aiBusy ? 'Generating...' : 'Generate'}
+                {aiBusy ? 'Generating…' : 'Generate'}
               </button>
               <button className="btn" onClick={() => setAiOpen(false)}>
                 Cancel

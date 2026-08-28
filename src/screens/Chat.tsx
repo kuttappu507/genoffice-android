@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChatMsg } from '../types';
+import { Icon } from '../components/Icon';
 import { chatStream, errMsg, trimMessages } from '../lib/ai-client';
 import { contextBudget } from '../lib/models';
 import { debounce, getDoc, getSettings, listDocs, putDoc, removeDoc, uid } from '../lib/storage';
@@ -107,13 +108,16 @@ export default function Chat({ initialId }: { initialId?: string }) {
 
   return (
     <div className="screen chat-screen">
-      <header className="screen-head">
+      <header className="screen-head chat-head">
+        <span className="chat-glyph">
+          <Icon name="chat" size={20} />
+        </span>
         <input className="title-input" value={title} onChange={(e) => { setTitle(e.target.value); }} placeholder="Chat title" />
-        <button className="btn small" onClick={() => setShowList(!showList)}>
-          {showList ? 'Close' : 'Chats'}
+        <button className={`icon-btn${showList ? ' active' : ''}`} aria-label="Saved chats" onClick={() => setShowList(!showList)}>
+          <Icon name="clock" size={20} />
         </button>
-        <button className="btn small primary" onClick={newChat}>
-          New
+        <button className="icon-btn active" aria-label="New chat" onClick={newChat}>
+          <Icon name="edit" size={19} />
         </button>
       </header>
 
@@ -122,6 +126,9 @@ export default function Chat({ initialId }: { initialId?: string }) {
           {chats.length === 0 && <p className="empty">No saved chats yet.</p>}
           {chats.map((c) => (
             <div key={c.id} className="list-row">
+              <span className="chat-glyph small">
+                <Icon name="chat" size={15} />
+              </span>
               <button
                 className="list-title as-btn"
                 onClick={() => {
@@ -134,8 +141,8 @@ export default function Chat({ initialId }: { initialId?: string }) {
               >
                 {c.title}
               </button>
-              <button className="btn small danger" onClick={() => { removeDoc(c.id); if (c.id === convId) newChat(); }}>
-                Del
+              <button className="icon-btn danger" aria-label="Delete chat" onClick={() => { removeDoc(c.id); if (c.id === convId) newChat(); }}>
+                <Icon name="trash" size={17} />
               </button>
             </div>
           ))}
@@ -184,12 +191,12 @@ export default function Chat({ initialId }: { initialId?: string }) {
           }}
         />
         {busy ? (
-          <button className="btn danger" onClick={stop}>
-            Stop
+          <button className="send-fab stop" aria-label="Stop generating" onClick={stop}>
+            <Icon name="stop" size={20} />
           </button>
         ) : (
-          <button className="btn primary" onClick={() => void send()} disabled={!input.trim()}>
-            Send
+          <button className="send-fab" aria-label="Send" onClick={() => void send()} disabled={!input.trim()}>
+            <Icon name="send" size={19} />
           </button>
         )}
       </div>

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { Provider } from '../types';
+import { Icon } from '../components/Icon';
 import { testConnection, errMsg, TestResult } from '../lib/ai-client';
 import { PROVIDER_PRESETS, contextBudget } from '../lib/models';
 import { downloadText, exportAll, getSettings, importAll, saveSettings } from '../lib/storage';
@@ -47,12 +48,12 @@ export default function Settings() {
 
   return (
     <div className="screen">
-      <header className="screen-head">
+      <header className="screen-head settings-head">
         <h2 className="screen-title">Settings</h2>
       </header>
 
       <section className="card">
-        <h3>AI provider (BYOK)</h3>
+        <h3><Icon name="cpu" size={17} /> AI provider (BYOK)</h3>
         <p className="hint">Your key is stored only on this device and sent only to the provider you choose.</p>
         <div className="btn-row">
           {(Object.keys(PROVIDER_PRESETS) as Provider[]).map((p) => (
@@ -152,7 +153,7 @@ export default function Settings() {
       </section>
 
       <section className="card">
-        <h3>Data</h3>
+        <h3><Icon name="database" size={17} /> Data</h3>
         <p className="hint">Everything lives in on-device storage. Export a JSON backup to move devices.</p>
         <div className="btn-row">
           <button
@@ -187,7 +188,7 @@ export default function Settings() {
       </section>
 
       <section className="card">
-        <h3>About</h3>
+        <h3><Icon name="info" size={17} /> About</h3>
         <p className="hint">
           GenOffice Mobile - the Android port of the GenOffice AI office suite. BYOK (bring your own
           key) via OpenRouter or NVIDIA NIM. No account, no login, no telemetry. Documents stay on
