@@ -209,6 +209,54 @@ export interface TestResult {
   reply: string;
 }
 
+export interface RemoteModel {
+  id: string;
+  label: string;
+  free: boolean;
+  context: number;
+}
+
+/**
+ * Fetch the provider's live model catalogue (OpenAI-compatible GET /models).
+ * OpenRouter works without a key (381+ models, `:free` ones detected via id
+ * suffix or zero pricing); NVIDIA NIM and OpenAI-compatible local servers use
+ * the same endpoint shape with Bearer auth.
+ */
+export async function listModels(s: AISettings): Promise<RemoteModel[]> {
+  const res = await fetch(endpoint(s, '/models'), {
+    method: 'GET',
+    headers: buildHeaders(s),
+  });
+  if (!res.ok) {
+    throw new ApiError(res.status, friendly(res.status, await res.text().catch(() => '')));
+  }
+  const j = (await res.json()) as {
+    data?: {
+      id?: string;
+      name?: string;
+      context_length?: number;
+      pricing?: { prompt?: string; completion?: string };
+    }[];
+  };
+  const arr = Array.isArray(j.data) ? j.data : [];
+  const out: RemoteModel[] = [];
+  for (const m of arr) {
+    if (!m || typeof m.id !== 'string' || !m.id) continue;
+    const prompt = Number(m.pricing?.prompt ?? '1');
+    const comp = Number(m.pricing?.completion ?? '1');
+    const zero = Number.isFinite(prompt) && Number.isFinite(comp) && prompt === 0 && comp === 0;
+    out.push({
+      id: m.id,
+      label: typeof m.name === 'string' && m.name ? m.name : m.id,
+      free: m.id.endsWith(':free') || zero,
+      context: typeof m.context_length === 'number' ? m.context_length : 0,
+    });
+  }
+  // free tier first, then alphabetical
+  out.sort((a, b) => (a.free === b.free ? a.id.localeCompare(b.id) : a.free ? -1 : 1));
+  return out;
+}
+
 /** Small non-streaming ping used by Settings "Test connection". */
 export async function testConnection(s: AISettings): Promise<TestResult> {
   const t0 = Date.now();

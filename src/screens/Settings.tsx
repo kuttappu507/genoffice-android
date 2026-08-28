@@ -1,9 +1,16 @@
 import { useState } from 'react';
 import type { Provider } from '../types';
 import { Icon } from '../components/Icon';
-import { testConnection, errMsg, TestResult } from '../lib/ai-client';
+import { listModels, testConnection, errMsg, type RemoteModel, type TestResult } from '../lib/ai-client';
 import { PROVIDER_PRESETS, contextBudget } from '../lib/models';
 import { downloadText, exportAll, getSettings, importAll, saveSettings } from '../lib/storage';
+
+/** 1048576 -> "1M", 131072 -> "131K" - compact context-length for option labels. */
+function fmtCtx(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M`;
+  if (n >= 1000) return `${Math.round(n / 1000)}K`;
+  return String(n);
+}
 
 export default function Settings() {
   const [s, setS] = useState(getSettings());
@@ -12,6 +19,10 @@ export default function Settings() {
   const [result, setResult] = useState<TestResult | null>(null);
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
+  const [remote, setRemote] = useState<RemoteModel[] | null>(null);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [freeOnly, setFreeOnly] = useState(false);
+  const [modelErr, setModelErr] = useState('');
 
   const patch = (p: Partial<typeof s>) => {
     const next = { ...s, ...p };
@@ -24,6 +35,23 @@ export default function Settings() {
     patch({ provider: p, baseUrl: preset.baseUrl, model: preset.models[0]?.id ?? s.model });
     setResult(null);
     setError('');
+    setRemote(null);
+    setModelErr('');
+    setFreeOnly(false);
+  };
+
+  const loadModels = async () => {
+    setLoadingModels(true);
+    setModelErr('');
+    try {
+      const list = await listModels(s);
+      setRemote(list);
+      if (list.length === 0) setModelErr('Provider returned an empty model list - type the id manually below.');
+    } catch (e) {
+      setModelErr(errMsg(e));
+    } finally {
+      setLoadingModels(false);
+    }
   };
 
   const runTest = async () => {
@@ -65,7 +93,15 @@ export default function Settings() {
 
         <label className="field">
           <span>Base URL</span>
-          <input className="input" value={s.baseUrl} onChange={(e) => patch({ baseUrl: e.target.value })} />
+          <input
+            className="input"
+            value={s.baseUrl}
+            onChange={(e) => {
+              patch({ baseUrl: e.target.value });
+              setRemote(null);
+              setModelErr('');
+            }}
+          />
         </label>
 
         <label className="field">
@@ -108,7 +144,41 @@ export default function Settings() {
               ))}
             </select>
           )}
-          <input className="input" value={s.model} onChange={(e) => patch({ model: e.target.value })} placeholder="model id" />
+          {remote && remote.length > 0 && (
+            <select
+              className="input"
+              value={remote.some((m) => m.id === s.model) ? s.model : ''}
+              onChange={(e) => e.target.value && patch({ model: e.target.value })}
+            >
+              <option value="" disabled>
+                {freeOnly ? remote.filter((m) => m.free).length : remote.length} models loaded - pick one
+              </option>
+              {(freeOnly ? remote.filter((m) => m.free) : remote).map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.free ? '[free] ' : ''}
+                  {m.label}
+                  {m.context >= 1000 ? ` · ${fmtCtx(m.context)} ctx` : ''}
+                </option>
+              ))}
+            </select>
+          )}
+          <div className="btn-row">
+            <button type="button" className="btn small" disabled={loadingModels} onClick={() => void loadModels()}>
+              {loadingModels ? 'Loading models...' : remote ? 'Refresh model list' : 'List models from my key'}
+            </button>
+            {remote && remote.some((m) => m.free) && (
+              <button type="button" className={`btn small${freeOnly ? ' primary' : ''}`} onClick={() => setFreeOnly(!freeOnly)}>
+                {freeOnly ? 'Free only: on' : 'Free only: off'}
+              </button>
+            )}
+          </div>
+          {remote && remote.length > 0 && (
+            <p className="hint">
+              {remote.length} models · {remote.filter((m) => m.free).length} free. Free ones are listed first.
+            </p>
+          )}
+          {modelErr && <p className="err">{modelErr}</p>}
+          <input className="input" value={s.model} onChange={(e) => patch({ model: e.target.value })} placeholder="model id (or type manually)" />
         </label>
 
         <label className="field">
