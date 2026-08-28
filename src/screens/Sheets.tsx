@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { evalCell } from '../lib/formulas';
 import { chatStream, errMsg } from '../lib/ai-client';
+import { exportXlsx, importSpreadsheet, openFilePicker, saveBinary, sanitizeName } from '../lib/fileio';
 import { debounce, downloadText, getDoc, getSettings, putDoc, uid } from '../lib/storage';
 
 const COLS = 26;
@@ -105,6 +106,36 @@ export default function Sheets({ initialId }: { initialId?: string }) {
     }
   };
 
+  const openFile = async () => {
+    const pick = await openFilePicker('.xlsx,.xls,.csv');
+    if (!pick) return;
+    try {
+      const { cells: loaded } = await importSpreadsheet(pick.buf);
+      setCells(loaded);
+      setSel('A1');
+      setEditing(loaded['A1'] ?? '');
+      setTitle(pick.name.replace(/\.[^.]+$/, ''));
+      save(loaded, pick.name.replace(/\.[^.]+$/, ''));
+      setToast(`Opened ${pick.name} (${Object.keys(loaded).length} cells)`);
+      setTimeout(() => setToast(''), 3500);
+    } catch (e) {
+      setToast(`Could not open: ${errMsg(e)}`);
+      setTimeout(() => setToast(''), 3500);
+    }
+  };
+
+  const saveXlsx = async () => {
+    try {
+      const bytes = await exportXlsx(title, cells);
+      await saveBinary(sanitizeName(title, 'xlsx'), bytes, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      setToast('Workbook saved');
+      setTimeout(() => setToast(''), 3000);
+    } catch (e) {
+      setToast(`Save failed: ${errMsg(e)}`);
+      setTimeout(() => setToast(''), 3500);
+    }
+  };
+
   const exportCsv = () => {
     let maxRow = 0;
     let maxCol = 0;
@@ -171,6 +202,12 @@ export default function Sheets({ initialId }: { initialId?: string }) {
         />
         <button className="btn small" onClick={() => setAiOpen(true)}>
           AI Fill
+        </button>
+        <button className="btn small" onClick={() => void openFile()}>
+          Open
+        </button>
+        <button className="btn small primary" onClick={() => void saveXlsx()}>
+          Xlsx
         </button>
         <button className="btn small" onClick={exportCsv}>
           CSV

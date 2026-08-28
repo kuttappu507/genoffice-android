@@ -1,6 +1,7 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { chatStream, errMsg } from '../lib/ai-client';
 import { debounce, getDoc, getSettings, putDoc, downloadText, uid } from '../lib/storage';
+import { exportDocx, importDocx, openFilePicker, saveBinary, sanitizeName, textToHtml } from '../lib/fileio';
 
 interface DocData {
   html: string;
@@ -33,13 +34,17 @@ export default function Docs({ initialId }: { initialId?: string }) {
   const editorRef = useRef<HTMLDivElement>(null);
   const loaded = useRef(false);
 
-  if (!loaded.current) {
+  useEffect(() => {
+    if (loaded.current) return;
     loaded.current = true;
     if (initialId) {
       const d = getDoc<DocData>(initialId);
-      if (d && editorRef.current) editorRef.current.innerHTML = d.html;
+      if (d && editorRef.current) {
+        editorRef.current.innerHTML = d.html;
+        setWords(d.html ? (editorRef.current.innerText ?? '').trim().split(/\s+/).length : 0);
+      }
     }
-  }
+  }, [initialId]);
 
   const save = useMemo(
     () =>
@@ -115,9 +120,38 @@ export default function Docs({ initialId }: { initialId?: string }) {
     }
   };
 
+  const openFile = async () => {
+    const pick = await openFilePicker('.docx,.txt,.md,.html,.htm');
+    if (!pick) return;
+    try {
+      const ext = (pick.name.split('.').pop() ?? '').toLowerCase();
+      let html = '';
+      if (ext === 'docx') html = await importDocx(pick.buf);
+      else if (ext === 'html' || ext === 'htm') {
+        html = new DOMParser().parseFromString(new TextDecoder().decode(pick.buf), 'text/html').body.innerHTML;
+      } else html = textToHtml(new TextDecoder().decode(pick.buf));
+      if (editorRef.current) editorRef.current.innerHTML = html;
+      setTitle(pick.name.replace(/\.[^.]+$/, ''));
+      recount();
+      save();
+      flash(`Opened ${pick.name}`);
+    } catch (e) {
+      flash(`Could not open: ${errMsg(e)}`);
+    }
+  };
+
+  const saveDocx = async () => {
+    try {
+      const blob = await exportDocx(title, editorRef.current?.innerHTML ?? '');
+      flash(await saveBinary(sanitizeName(title, 'docx'), blob, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'));
+    } catch (e) {
+      flash(`Save failed: ${errMsg(e)}`);
+    }
+  };
+
   const flash = (msg: string) => {
     setToast(msg);
-    setTimeout(() => setToast(''), 2500);
+    setTimeout(() => setToast(''), 3000);
   };
 
   return (
@@ -132,6 +166,12 @@ export default function Docs({ initialId }: { initialId?: string }) {
           }}
           placeholder="Document title"
         />
+        <button className="btn small" onClick={() => void openFile()}>
+          Open
+        </button>
+        <button className="btn small primary" onClick={() => void saveDocx()}>
+          Docx
+        </button>
         <button
           className="btn small"
           onClick={() => {
@@ -139,7 +179,7 @@ export default function Docs({ initialId }: { initialId?: string }) {
             void downloadText(`${title.replace(/[^\w-]+/g, '_') || 'document'}.html`, html, 'text/html').then(flash);
           }}
         >
-          Export
+          Html
         </button>
       </header>
 

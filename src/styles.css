@@ -807,6 +807,26 @@ select.input {
   align-items: center;
 }
 
+.open-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin: 10px 0 4px;
+  flex-wrap: wrap;
+}
+
+.editor table {
+  border-collapse: collapse;
+  margin: 8px 0;
+}
+
+.editor td,
+.editor th {
+  border: 1px solid var(--line);
+  padding: 4px 8px;
+  font-size: 13.5px;
+}
+
 /* ---------- small portrait phones (<= 380px) ---------- */
 @media (max-width: 380px) {
   .screen {

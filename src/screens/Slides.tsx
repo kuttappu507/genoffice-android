@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { chatStream, errMsg } from '../lib/ai-client';
+import { exportPptx, importPptx, openFilePicker, saveBinary, sanitizeName } from '../lib/fileio';
 import { debounce, getDoc, getSettings, putDoc, uid } from '../lib/storage';
 
 interface Slide {
@@ -108,9 +109,35 @@ export default function Slides({ initialId }: { initialId?: string }) {
     }
   };
 
+  const openFile = async () => {
+    const pick = await openFilePicker('.pptx');
+    if (!pick) return;
+    try {
+      const slides = await importPptx(pick.buf);
+      if (slides.length === 0) throw new Error('No slides found in the file');
+      update(slides);
+      setSel(0);
+      setTitle(pick.name.replace(/\.[^.]+$/, ''));
+      flash(`Opened ${pick.name} (${slides.length} slides)`);
+    } catch (e) {
+      flash(`Could not open: ${errMsg(e)}`);
+    }
+  };
+
+  const savePptx = async () => {
+    if (slides.length === 0) return;
+    try {
+      const bytes = await exportPptx(title, slides);
+      await saveBinary(sanitizeName(title, 'pptx'), bytes, 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
+      flash('Presentation saved');
+    } catch (e) {
+      flash(`Save failed: ${errMsg(e)}`);
+    }
+  };
+
   const flash = (msg: string) => {
     setToast(msg);
-    setTimeout(() => setToast(''), 2500);
+    setTimeout(() => setToast(''), 3000);
   };
 
   if (presenting && slides.length > 0) {
@@ -162,6 +189,12 @@ export default function Slides({ initialId }: { initialId?: string }) {
         </button>
         <button className="btn small" onClick={() => setAiOpen(true)}>
           AI Outline
+        </button>
+        <button className="btn small" onClick={() => void openFile()}>
+          Open
+        </button>
+        <button className="btn small primary" disabled={slides.length === 0} onClick={() => void savePptx()}>
+          Pptx
         </button>
       </header>
 

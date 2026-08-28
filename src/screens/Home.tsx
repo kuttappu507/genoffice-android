@@ -1,6 +1,8 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import type { DocKind } from '../types';
-import { getSettings, listDocs } from '../lib/storage';
+import { getSettings, listDocs, putDoc, uid } from '../lib/storage';
+import { errMsg } from '../lib/ai-client';
+import { baseName, importDocx, importPptx, importSpreadsheet, openFilePicker, textToHtml } from '../lib/fileio';
 
 const ACTIONS: { kind: DocKind; label: string; desc: string }[] = [
   { kind: 'doc', label: 'Document', desc: 'Write with AI assistance' },
@@ -34,6 +36,58 @@ export default function Home({
   const recent = useMemo(() => listDocs().slice(0, 12), []);
   const settings = useMemo(() => getSettings(), []);
   const configured = settings.apiKey.trim().length > 0;
+  const [opening, setOpening] = useState(false);
+  const [openErr, setOpenErr] = useState('');
+
+  const openAny = async () => {
+    const pick = await openFilePicker('.docx,.xlsx,.xls,.csv,.pptx,.txt,.md,.html,.htm');
+    if (!pick) return;
+    setOpening(true);
+    setOpenErr('');
+    try {
+      const ext = (pick.name.split('.').pop() ?? '').toLowerCase();
+      const base = baseName(pick.name);
+      if (ext === 'docx') {
+        const html = await importDocx(pick.buf);
+        const id = uid();
+        putDoc('doc', id, base, { html });
+        onOpen('doc', id);
+        return;
+      }
+      if (ext === 'xlsx' || ext === 'xls' || ext === 'csv') {
+        const { cells } = await importSpreadsheet(pick.buf);
+        const id = uid();
+        putDoc('sheet', id, base, { cells });
+        onOpen('sheet', id);
+        return;
+      }
+      if (ext === 'pptx') {
+        const slides = await importPptx(pick.buf);
+        if (slides.length === 0) throw new Error('No slides found in the file');
+        const id = uid();
+        putDoc('deck', id, base, { slides });
+        onOpen('deck', id);
+        return;
+      }
+      if (ext === 'txt' || ext === 'md' || ext === 'html' || ext === 'htm') {
+        let html: string;
+        if (ext === 'html' || ext === 'htm') {
+          html = new DOMParser().parseFromString(new TextDecoder().decode(pick.buf), 'text/html').body.innerHTML;
+        } else {
+          html = textToHtml(new TextDecoder().decode(pick.buf));
+        }
+        const id = uid();
+        putDoc('doc', id, base, { html });
+        onOpen('doc', id);
+        return;
+      }
+      setOpenErr(`Unsupported file type: .${ext}`);
+    } catch (e) {
+      setOpenErr(`Could not open ${pick.name}: ${errMsg(e)}`);
+    } finally {
+      setOpening(false);
+    }
+  };
 
   return (
     <div className="screen">
@@ -48,6 +102,13 @@ export default function Home({
             No API key yet - tap to add one in Settings
           </button>
         )}
+        <div className="open-row">
+          <button className="btn primary" disabled={opening} onClick={() => void openAny()}>
+            {opening ? 'Opening...' : 'Open file'}
+          </button>
+          <span className="hint">.docx .xlsx .xls .csv .pptx .txt .md</span>
+        </div>
+        {openErr && <p className="err">{openErr}</p>}
       </header>
 
       <section className="tiles">

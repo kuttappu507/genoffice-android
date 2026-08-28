@@ -13,16 +13,35 @@ No account. No login. No telemetry. Your API key and documents never leave your 
 | App | Features |
 | --- | --- |
 | **AI Chat** | Streaming responses, any OpenAI-compatible model, collapsible thinking section, auto-trimmed history, stop button, multiple saved conversations |
-| **Docs** | Rich-text editor (bold/italic/headings/lists), word count, AI actions: Continue / Summarize / Rewrite, HTML export, autosave |
-| **Sheets** | 26x60 grid, formula engine (`=A1+B2*2`, `SUM/AVERAGE/COUNT/MIN/MAX/ABS/ROUND`, ranges like `=SUM(A1:B9)`), AI table generation, CSV export |
-| **Slides** | Slide editor (title + bullets), reorder/delete, fullscreen present mode, AI outline generation |
+| **Docs** | Open and edit **.docx** (mammoth), .txt, .md, .html; save as real **.docx**; rich-text toolbar; AI continue/summarize/rewrite; autosave |
+| **Sheets** | Open and edit **.xlsx / .xls / .csv** (SheetJS) with formulas preserved; save as real **.xlsx** with live formulas + cached values; formula engine (`=A1+B2*2`, `SUM/AVERAGE/COUNT/MIN/MAX/ABS/ROUND`, ranges); AI table generation |
+| **Slides** | Open **.pptx** (text extraction via JSZip); save as real **.pptx** (pptxgenjs); slide editor; fullscreen present mode; AI outline generation |
 | **Settings** | Provider switch (OpenRouter / NVIDIA NIM / custom), free-tier model presets, "Test connection" ping with latency, backup export/import |
+| **Home** | Office-style "Open file" entry point that routes each format to the right editor |
 
 Everything is stored locally on the device (localStorage in the app sandbox). AI features need
 your own key:
 
 - **OpenRouter** - free models available (any id ending in `:free`), get a key at <https://openrouter.ai/keys>
 - **NVIDIA NIM** - free tier at <https://build.nvidia.com>
+
+## Open and edit real Office files
+
+Tap **Open file** on Home (or **Open** inside Docs / Sheets / Slides) and pick a file:
+
+| Format | Open | Save |
+| --- | --- | --- |
+| .docx | yes - converted to editable rich text | yes - real .docx (docx library) |
+| .xlsx / .xls / .csv | yes - first sheet, formulas kept | yes - real .xlsx with live formulas |
+| .pptx | yes - titles + bullets extracted | yes - real .pptx (pptxgenjs) |
+| .txt / .md / .html | yes | .docx / .html |
+
+On Android, saving opens the **system share sheet** so you can send the file to Drive, mail it,
+or store it anywhere. On desktop browsers it downloads directly. Parsing and writing happen
+entirely on-device; nothing is uploaded.
+
+Sample files to try: `download/genoffice-ui/samples/sample.docx|xlsx|pptx` in this project
+(regenerable via `node scripts/make-samples.mjs`).
 
 ## Built-in token savings (free-tier friendly)
 
@@ -89,8 +108,8 @@ android/              native Android shell (Capacitor)
 
 ## Roadmap
 
-- Capacitor Filesystem for documents in the shared Documents folder
-- Share sheet integration (send exported files to other apps)
+- PDF viewer (pdf.js)
+- Open password-protected Office files
 - Release signing + Play Store pipeline
 - iOS target from the same code base (`npx cap add ios`)
 - Optional sync of the desktop fork's document format
