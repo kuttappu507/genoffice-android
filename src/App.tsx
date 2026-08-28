@@ -11,7 +11,7 @@ type Tab = 'home' | 'chat' | 'docs' | 'sheets' | 'slides' | 'settings';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'home', label: 'Home' },
-  { id: 'chat', label: 'AI Chat' },
+  { id: 'chat', label: 'Chat' },
   { id: 'docs', label: 'Docs' },
   { id: 'sheets', label: 'Sheets' },
   { id: 'slides', label: 'Slides' },
