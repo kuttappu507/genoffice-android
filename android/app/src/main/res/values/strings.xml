@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">GenOffice</string>
+    <string name="title_activity_main">GenOffice</string>
+    <string name="package_name">com.kuttappu507.genoffice</string>
+    <string name="custom_url_scheme">com.kuttappu507.genoffice</string>
+</resources>
