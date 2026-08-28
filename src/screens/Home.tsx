@@ -12,11 +12,13 @@ const ACTIONS: { kind: DocKind; label: string; desc: string }[] = [
 ];
 
 const KIND_LABEL: Record<DocKind, string> = {
-  doc: 'Doc',
-  sheet: 'Sheet',
-  deck: 'Deck',
-  chat: 'Chat',
+  doc: 'W',
+  sheet: 'X',
+  deck: 'P',
+  chat: 'AI',
 };
+
+const ICON_LETTER = KIND_LABEL;
 
 function ago(ts: number): string {
   const s = Math.floor((Date.now() - ts) / 1000);
@@ -92,7 +94,15 @@ export default function Home({
   return (
     <div className="screen">
       <header className="hero">
-        <h1>GenOffice</h1>
+        <div className="office-header">
+          <div className="brand">
+            <span className="brand-mark">G</span>
+            GenOffice
+          </div>
+          <button className="btn small" onClick={() => onGo('settings')}>
+            Settings
+          </button>
+        </div>
         <p className="tagline">
           Local-first AI office for your phone. Bring your own key - OpenRouter or NVIDIA - and keep
           every file on your device.
@@ -114,8 +124,11 @@ export default function Home({
       <section className="tiles">
         {ACTIONS.map((a) => (
           <button key={a.kind} className="tile" onClick={() => onGo(a.kind === 'chat' ? 'chat' : a.kind === 'doc' ? 'docs' : a.kind === 'sheet' ? 'sheets' : 'slides')}>
-            <strong>{a.label}</strong>
-            <span>{a.desc}</span>
+            <span className={`tile-icon icon-${a.kind}`}>{ICON_LETTER[a.kind]}</span>
+            <span className="tile-text">
+              <strong>{a.label}</strong>
+              <span>{a.desc}</span>
+            </span>
           </button>
         ))}
       </section>

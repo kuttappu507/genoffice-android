@@ -1,16 +1,22 @@
 :root {
-  --bg: #0f1117;
-  --bg-2: #171a23;
-  --bg-3: #1f2430;
-  --line: #2a3040;
-  --text: #e8eaee;
-  --text-dim: #9aa3b2;
-  --accent: #7c9cff;
-  --accent-2: #5f7ef0;
-  --ok: #57c98b;
-  --danger: #e06c75;
-  --warn: #e5c07b;
-  --radius: 12px;
+  --bg: #f5f5f5;
+  --bg-2: #ffffff;
+  --bg-3: #f3f3f3;
+  --line: #e1e1e1;
+  --text: #1b1b1b;
+  --text-dim: #616161;
+  --accent: #185abd;
+  --accent-2: #185abd;
+  --word: #2b579a;
+  --excel: #107c41;
+  --ppt: #c43e1c;
+  --chatc: #7460a8;
+  --ok: #107c41;
+  --danger: #a4262c;
+  --warn: #8a6a00;
+  --warn-bg: #fff8e6;
+  --radius: 8px;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.09);
 }
 
 * {
@@ -27,7 +33,7 @@ body,
 body {
   background: var(--bg);
   color: var(--text);
-  font-family: -apple-system, 'Segoe UI', Roboto, 'Noto Sans', sans-serif;
+  font-family: 'Segoe UI', -apple-system, Roboto, 'Noto Sans', sans-serif;
   font-size: 15px;
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
@@ -44,6 +50,7 @@ body {
   flex: 1;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  background: var(--bg);
 }
 
 .screen {
@@ -70,6 +77,7 @@ body {
   flex: 1;
   background: none;
   border: none;
+  border-top: 2px solid transparent;
   color: var(--text-dim);
   font-size: 11px;
   font-weight: 600;
@@ -79,32 +87,34 @@ body {
 
 .tab.active {
   color: var(--accent);
+  border-top-color: var(--accent);
+  background: #f0f5fc;
 }
 
 /* ---------- typography / layout ---------- */
 
 .hero h1 {
   margin: 4px 0 6px;
-  font-size: 26px;
+  font-size: 24px;
 }
 
 .tagline {
   color: var(--text-dim);
   margin: 0 0 12px;
+  font-size: 13.5px;
 }
 
 .section-title {
-  font-size: 15px;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  margin: 20px 0 8px;
+  font-size: 14px;
+  color: var(--text);
+  font-weight: 600;
+  margin: 22px 0 10px;
 }
 
 .empty {
   color: var(--text-dim);
   background: var(--bg-2);
-  border: 1px dashed var(--line);
+  border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 14px;
 }
@@ -128,7 +138,7 @@ body {
   border: none;
   color: var(--text);
   font-size: 18px;
-  font-weight: 700;
+  font-weight: 600;
   padding: 8px 0;
   outline: none;
 }
@@ -136,15 +146,16 @@ body {
 /* ---------- controls ---------- */
 
 .btn {
-  background: var(--bg-3);
+  background: var(--bg-2);
   color: var(--text);
-  border: 1px solid var(--line);
-  border-radius: 10px;
+  border: 1px solid #cccccc;
+  border-radius: 4px;
   padding: 10px 14px;
   font-size: 14px;
   font-weight: 600;
   min-height: 44px;
   cursor: pointer;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.05);
 }
 
 .btn:disabled {
@@ -152,8 +163,8 @@ body {
 }
 
 .btn.primary {
-  background: var(--accent-2);
-  border-color: var(--accent-2);
+  background: var(--accent);
+  border-color: var(--accent);
   color: #fff;
 }
 
@@ -161,6 +172,7 @@ body {
   border-color: var(--danger);
   color: var(--danger);
   background: none;
+  box-shadow: none;
 }
 
 .btn.small {
@@ -181,8 +193,8 @@ textarea.input,
 select.input {
   width: 100%;
   background: var(--bg-2);
-  border: 1px solid var(--line);
-  border-radius: 10px;
+  border: 1px solid #cccccc;
+  border-radius: 4px;
   color: var(--text);
   padding: 11px 12px;
   font-size: 15px;
@@ -236,6 +248,7 @@ select.input {
   text-decoration: none;
   display: inline-block;
   margin-top: 6px;
+  font-weight: 600;
 }
 
 .ok {
@@ -245,7 +258,7 @@ select.input {
 
 .err {
   color: var(--danger);
-  font-size: 14px;
+  font-size: 13.5px;
   word-break: break-word;
 }
 
@@ -255,6 +268,7 @@ select.input {
   border-radius: var(--radius);
   padding: 14px;
   margin-bottom: 14px;
+  box-shadow: var(--shadow);
 }
 
 .card h3 {
@@ -264,22 +278,61 @@ select.input {
 
 .chip {
   display: inline-block;
-  border-radius: 999px;
+  border-radius: 4px;
   padding: 8px 14px;
   font-size: 13px;
   font-weight: 600;
-  border: 1px solid var(--line);
+  border: 1px solid #cccccc;
   background: var(--bg-2);
   color: var(--text);
   cursor: pointer;
 }
 
 .chip.warn {
-  border-color: var(--warn);
+  border-color: #d8b900;
   color: var(--warn);
+  background: var(--warn-bg);
+}
+
+/* ---------- Office-style header / brand ---------- */
+
+.office-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.brand-mark {
+  width: 30px;
+  height: 30px;
+  border-radius: 4px;
+  background: linear-gradient(135deg, #185abd, #2b579a);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* ---------- home ---------- */
+
+.open-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin: 12px 0 4px;
+  flex-wrap: wrap;
+}
 
 .tiles {
   display: grid;
@@ -289,25 +342,62 @@ select.input {
 
 .tile {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  gap: 10px;
   text-align: left;
   background: var(--bg-2);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 14px;
+  padding: 12px;
   color: var(--text);
-  min-height: 84px;
+  min-height: 72px;
   cursor: pointer;
+  box-shadow: var(--shadow);
 }
 
-.tile strong {
+.tile-icon {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  border-radius: 4px;
+  color: #fff;
   font-size: 16px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.tile span {
+.icon-doc {
+  background: var(--word);
+}
+
+.icon-sheet {
+  background: var(--excel);
+}
+
+.icon-deck {
+  background: var(--ppt);
+}
+
+.icon-chat {
+  background: var(--chatc);
+}
+
+.tile-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tile-text strong {
+  font-size: 14.5px;
+}
+
+.tile-text span {
   color: var(--text-dim);
-  font-size: 12.5px;
+  font-size: 11.5px;
 }
 
 .list {
@@ -322,11 +412,12 @@ select.input {
   gap: 10px;
   background: var(--bg-2);
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius);
   padding: 10px 12px;
   color: var(--text);
   width: 100%;
   cursor: pointer;
+  box-shadow: var(--shadow);
 }
 
 .list-title {
@@ -345,24 +436,33 @@ select.input {
 }
 
 .badge {
-  font-size: 11px;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  font-size: 12.5px;
   font-weight: 700;
-  border-radius: 6px;
-  padding: 3px 7px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: var(--bg-3);
-  color: var(--accent);
+  color: #fff;
+}
+
+.badge-doc {
+  background: var(--word);
 }
 
 .badge-sheet {
-  color: var(--ok);
+  background: var(--excel);
 }
 
 .badge-deck {
-  color: var(--warn);
+  background: var(--ppt);
 }
 
 .badge-chat {
-  color: var(--text-dim);
+  background: var(--chatc);
 }
 
 .as-btn {
@@ -398,7 +498,7 @@ select.input {
 
 .msg {
   max-width: 92%;
-  border-radius: 14px;
+  border-radius: 8px;
   padding: 10px 12px;
   font-size: 14.5px;
   overflow-wrap: break-word;
@@ -406,16 +506,17 @@ select.input {
 
 .msg.user {
   align-self: flex-end;
-  background: var(--accent-2);
+  background: var(--accent);
   color: #fff;
-  border-bottom-right-radius: 4px;
+  border-bottom-right-radius: 2px;
 }
 
 .msg.assistant {
   align-self: flex-start;
   background: var(--bg-2);
   border: 1px solid var(--line);
-  border-bottom-left-radius: 4px;
+  border-bottom-left-radius: 2px;
+  box-shadow: var(--shadow);
 }
 
 .reasoning {
@@ -430,9 +531,9 @@ select.input {
 
 .reasoning-body {
   white-space: pre-wrap;
-  background: var(--bg);
+  background: var(--bg-3);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 6px;
   padding: 8px;
   margin-top: 6px;
   max-height: 200px;
@@ -447,16 +548,16 @@ select.input {
 }
 
 .md pre {
-  background: var(--bg);
+  background: var(--bg-3);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 6px;
   padding: 10px;
   overflow-x: auto;
   font-size: 12.5px;
 }
 
 .md code {
-  background: var(--bg);
+  background: var(--bg-3);
   border-radius: 4px;
   padding: 1px 5px;
   font-size: 13px;
@@ -497,8 +598,8 @@ select.input {
 
 .toolbar button {
   background: var(--bg-2);
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border: 1px solid #cccccc;
+  border-radius: 4px;
   color: var(--text);
   font-size: 13.5px;
   min-width: 42px;
@@ -509,11 +610,12 @@ select.input {
 .editor {
   min-height: 300px;
   background: var(--bg-2);
-  border: 1px solid var(--line);
+  border: 1px solid #cccccc;
   border-radius: var(--radius);
-  padding: 14px;
+  padding: 16px;
   outline: none;
   overflow-y: auto;
+  box-shadow: var(--shadow);
 }
 
 .editor:empty::before {
@@ -535,6 +637,7 @@ select.input {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 12px;
+  box-shadow: var(--shadow);
 }
 
 .ai-panel-head {
@@ -550,9 +653,9 @@ select.input {
 }
 
 .ai-result-text {
-  background: var(--bg);
+  background: var(--bg-3);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 6px;
   padding: 10px;
   white-space: pre-wrap;
   font-size: 14px;
@@ -571,7 +674,7 @@ select.input {
 .sheet-grid {
   flex: 1;
   overflow: auto;
-  border: 1px solid var(--line);
+  border: 1px solid #cccccc;
   border-radius: var(--radius);
   background: var(--bg-2);
 }
@@ -623,7 +726,7 @@ select.input {
 }
 
 .cell.selected {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--excel);
   outline-offset: -2px;
 }
 
@@ -636,7 +739,7 @@ select.input {
 
 .formula-ref {
   font-weight: 700;
-  color: var(--accent);
+  color: var(--excel);
   font-size: 13px;
   min-width: 38px;
 }
@@ -655,13 +758,14 @@ select.input {
   flex: 0 0 auto;
   width: 130px;
   height: 76px;
-  border-radius: 8px;
-  border: 1px solid var(--line);
+  border-radius: 6px;
+  border: 1px solid #cccccc;
   background: var(--bg-2);
   color: var(--text);
   padding: 8px 8px 4px;
   text-align: left;
   cursor: pointer;
+  box-shadow: var(--shadow);
 }
 
 .slide-thumb.selected {
@@ -678,7 +782,6 @@ select.input {
 }
 
 .slide-thumb-title {
-  display: block;
   font-size: 12px;
   font-weight: 600;
   overflow: hidden;
@@ -695,7 +798,7 @@ select.input {
 .present {
   position: fixed;
   inset: 0;
-  background: #05060a;
+  background: #1b1b1b;
   z-index: 100;
   display: flex;
   align-items: center;
@@ -727,22 +830,24 @@ select.input {
   max-height: 80vh;
   overflow-y: auto;
   pointer-events: none;
-  background: #10131c;
+  background: #ffffff;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 8px;
   padding: 28px 24px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
 }
 
 .present-content h2 {
   margin: 0 0 14px;
   font-size: 26px;
+  color: var(--text);
 }
 
 .present-content ul {
   padding-left: 22px;
   font-size: 18px;
   line-height: 1.7;
-  color: #cfd5e1;
+  color: #3b3b3b;
 }
 
 .present-bar {
@@ -754,7 +859,7 @@ select.input {
   justify-content: space-between;
   align-items: center;
   padding: 0 18px;
-  color: var(--text-dim);
+  color: #ffffff;
   z-index: 2;
 }
 
@@ -763,7 +868,7 @@ select.input {
 .modal {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.4);
   z-index: 50;
   display: flex;
   align-items: center;
@@ -778,6 +883,7 @@ select.input {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 18px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.18);
 }
 
 .modal-body h3 {
@@ -789,30 +895,23 @@ select.input {
   left: 50%;
   transform: translateX(-50%);
   bottom: calc(84px + env(safe-area-inset-bottom));
-  background: var(--bg-3);
-  border: 1px solid var(--line);
-  color: var(--text);
-  border-radius: 999px;
-  padding: 9px 18px;
+  background: #1b1b1b;
+  border: 1px solid #1b1b1b;
+  color: #ffffff;
+  border-radius: 4px;
+  padding: 10px 18px;
   font-size: 13px;
   z-index: 60;
   max-width: 90vw;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
 }
 
 .file-btn {
   display: inline-flex;
   align-items: center;
-}
-
-.open-row {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  margin: 10px 0 4px;
-  flex-wrap: wrap;
 }
 
 .editor table {
@@ -834,7 +933,11 @@ select.input {
   }
 
   .hero h1 {
-    font-size: 22px;
+    font-size: 21px;
+  }
+
+  .brand {
+    font-size: 18px;
   }
 
   .tab {
@@ -843,12 +946,12 @@ select.input {
     letter-spacing: -0.01em;
   }
 
-  .tile strong {
-    font-size: 14.5px;
+  .tile-text strong {
+    font-size: 13.5px;
   }
 
-  .tile span {
-    font-size: 11.5px;
+  .tile-text span {
+    font-size: 11px;
   }
 
   .cell {
