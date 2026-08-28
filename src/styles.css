@@ -1967,3 +1967,94 @@ mark.find-hit.cur {
     padding-left: 18px;
   }
 }
+
+/* ---------------- faithful shape rendering (imported decks) ---------------- */
+.sv {
+  position: relative;
+  overflow: hidden;
+  margin: 0 auto;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.18);
+  border-radius: 4px;
+  flex: 0 0 auto;
+}
+
+.sv-sh {
+  position: absolute;
+  overflow: hidden;
+}
+
+.sv-sh.img {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sv-sh.img img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.sv-sh p {
+  margin: 0;
+  line-height: 1.28;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: hidden;
+}
+
+.sv-sh.tappable {
+  cursor: pointer;
+}
+
+.sv-sh.tappable:hover {
+  outline: 1.5px dashed rgba(59, 130, 246, 0.85);
+  outline-offset: -1px;
+}
+
+.sv-sh.sel {
+  outline: 2px solid #3B82F6;
+  outline-offset: -2px;
+}
+
+.shape-canvas-holder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 14px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-2);
+}
+
+.shape-hint {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  text-align: center;
+  margin: 0;
+}
+
+.thumb-sv {
+  position: absolute;
+  inset: 0;
+  display: block;
+  pointer-events: none;
+}
+
+.thumb-sv .sv {
+  box-shadow: none;
+  border-radius: 0;
+}
+
+.shape-input {
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.4;
+}
+
+.present-content .sv {
+  margin: 0 auto;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.55);
+}

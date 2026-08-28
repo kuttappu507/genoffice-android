@@ -14,3 +14,7 @@ android/capacitor-cordova-android-plugins/
 android/app/src/main/assets/public/
 *.keystore
 !debug.keystore
+
+# local test artifacts
+shots/
+scripts/fileio-bundle.mjs

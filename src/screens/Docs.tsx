@@ -69,6 +69,8 @@ export default function Docs({ initialId, onExit }: { initialId?: string; onExit
 
   const editorRef = useRef<HTMLDivElement>(null);
   const loaded = useRef(false);
+  /** Last known selection inside the editor — restored before commands run. */
+  const savedRange = useRef<Range | null>(null);
 
   useEffect(() => {
     document.execCommand('styleWithCSS', false, 'true');
@@ -96,6 +98,12 @@ export default function Docs({ initialId, onExit }: { initialId?: string; onExit
       const sel = window.getSelection();
       try {
         const active = document.activeElement === ed;
+        // remember the exact range so ribbon taps (which blur the editor on
+        // touch devices) can restore it before execCommand
+        if (active && sel && sel.rangeCount > 0 && ed) {
+          const r = sel.getRangeAt(0);
+          if (ed.contains(r.commonAncestorContainer)) savedRange.current = r.cloneRange();
+        }
         if (active) {
           setFmt({
             bold: document.queryCommandState('bold'),
@@ -140,9 +148,33 @@ export default function Docs({ initialId, onExit }: { initialId?: string; onExit
     [docId, title],
   );
 
+  /** Focus the editor and put the selection back where the user left it. */
+  const restoreSel = (): boolean => {
+    const ed = editorRef.current;
+    if (!ed) return false;
+    ed.focus();
+    const sel = window.getSelection();
+    if (!sel) return false;
+    if (sel.rangeCount > 0 && ed.contains(sel.getRangeAt(0).commonAncestorContainer)) return true;
+    const r = savedRange.current;
+    if (!r) return false;
+    try {
+      sel.removeAllRanges();
+      sel.addRange(r);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const exec = (cmd: string, value?: string) => {
+    try {
+      document.execCommand('styleWithCSS', false, 'true');
+    } catch {
+      /* older engines */
+    }
+    restoreSel();
     document.execCommand(cmd, false, value);
-    editorRef.current?.focus();
     recount();
     save();
   };
@@ -150,26 +182,37 @@ export default function Docs({ initialId, onExit }: { initialId?: string; onExit
   /** Word-style font size: wraps the selection in a span with an exact px size. */
   const applyFontSize = (px: string) => {
     setFontSize(px);
+    const ed = editorRef.current;
+    if (!ed) return;
+    ed.focus();
     const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0) return;
-    editorRef.current?.focus();
-    if (sel.isCollapsed) {
+    let range: Range | null =
+      sel && sel.rangeCount > 0 && ed.contains(sel.getRangeAt(0).commonAncestorContainer)
+        ? sel.getRangeAt(0)
+        : savedRange.current;
+    if (!range) return; // nothing selected anywhere — nothing to resize
+    if (sel && sel.rangeCount === 0) {
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    if (range.collapsed) {
       document.execCommand('insertHTML', false, `<span style="font-size:${px}px">\u200b</span>`);
     } else {
-      const range = sel.getRangeAt(0);
       const span = document.createElement('span');
       span.style.fontSize = `${px}px`;
       try {
         span.appendChild(range.extractContents());
         range.insertNode(span);
-        sel.removeAllRanges();
+        sel?.removeAllRanges();
         const r2 = document.createRange();
         r2.selectNodeContents(span);
-        sel.addRange(r2);
+        sel?.addRange(r2);
+        savedRange.current = r2.cloneRange();
       } catch {
         document.execCommand('fontSize', false, '4');
       }
     }
+    recount();
     save();
   };
 
@@ -177,7 +220,6 @@ export default function Docs({ initialId, onExit }: { initialId?: string; onExit
     setFontFam(f);
     exec('fontName', f);
   };
-
   // ------------------------------------------------------------------ find & replace
   const clearHits = () => {
     const ed = editorRef.current;
@@ -480,11 +522,11 @@ export default function Docs({ initialId, onExit }: { initialId?: string; onExit
       {/* floating selection toolbar (Word mobile "Aa" bar) */}
       {selBar && (
         <div className="selbar" style={{ top: selBar.top, left: selBar.left }}>
-          <button className="icon-btn" aria-label="Bold" onMouseDown={(e) => e.preventDefault()} onClick={() => exec('bold')}><b>B</b></button>
-          <button className="icon-btn" aria-label="Italic" onMouseDown={(e) => e.preventDefault()} onClick={() => exec('italic')}><i>I</i></button>
-          <button className="icon-btn" aria-label="Underline" onMouseDown={(e) => e.preventDefault()} onClick={() => exec('underline')}><u>U</u></button>
-          <button className="icon-btn" aria-label="Strikethrough" onMouseDown={(e) => e.preventDefault()} onClick={() => exec('strikeThrough')}><s>S</s></button>
-          <button className="icon-btn aa" aria-label="Show all formatting tools" onMouseDown={(e) => e.preventDefault()} onClick={() => { setRTab('home'); setSelBar(null); }}>Aa</button>
+          <button className="icon-btn" aria-label="Bold" onPointerDown={(e) => e.preventDefault()} onMouseDown={(e) => e.preventDefault()} onClick={() => exec('bold')}><b>B</b></button>
+          <button className="icon-btn" aria-label="Italic" onPointerDown={(e) => e.preventDefault()} onMouseDown={(e) => e.preventDefault()} onClick={() => exec('italic')}><i>I</i></button>
+          <button className="icon-btn" aria-label="Underline" onPointerDown={(e) => e.preventDefault()} onMouseDown={(e) => e.preventDefault()} onClick={() => exec('underline')}><u>U</u></button>
+          <button className="icon-btn" aria-label="Strikethrough" onPointerDown={(e) => e.preventDefault()} onMouseDown={(e) => e.preventDefault()} onClick={() => exec('strikeThrough')}><s>S</s></button>
+          <button className="icon-btn aa" aria-label="Show all formatting tools" onPointerDown={(e) => e.preventDefault()} onMouseDown={(e) => e.preventDefault()} onClick={() => { setRTab('home'); setSelBar(null); }}>Aa</button>
         </div>
       )}
 

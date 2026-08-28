@@ -316,6 +316,44 @@ export interface DeckSlide {
   /** image placed on the slide (data URL) */
   image?: string;
   layout?: 'title' | 'content' | 'section' | 'blank';
+  /** faithful rendering of an imported slide: positioned shapes */
+  shapes?: SlideShape[];
+  /** slide canvas size in inches (defaults 10 x 5.63) */
+  cw?: number;
+  ch?: number;
+}
+
+/** One styled text run inside a shape paragraph. */
+export interface ShapeRun {
+  text: string;
+  /** font size in points */
+  sz?: number;
+  b?: boolean;
+  i?: boolean;
+  u?: boolean;
+  color?: string;
+}
+
+/** One paragraph inside a text shape. */
+export interface ShapePara {
+  runs: ShapeRun[];
+  align?: 'left' | 'center' | 'right' | 'justify';
+  bullet?: boolean;
+  /** 0-based indent level */
+  level?: number;
+}
+
+/** A positioned shape on the slide canvas (geometry in inches). */
+export interface SlideShape {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  kind: 'text' | 'image' | 'shape';
+  paras: ShapePara[];
+  fill?: string;
+  line?: string;
+  img?: string;
 }
 
 function decodeXmlEntities(s: string): string {
@@ -329,7 +367,177 @@ function decodeXmlEntities(s: string): string {
     .replace(/&amp;/g, '&');
 }
 
-/** .pptx -> deck slides (title = first text box, bullets = the rest). */
+// ---------------------------------------------------------------------------
+// PowerPoint (.pptx) — shape-level import/export for PC-grade fidelity
+// ---------------------------------------------------------------------------
+
+const SCHEME_COLORS: Record<string, string> = {
+  dk1: '000000', tx1: '000000', lt1: 'FFFFFF', bg1: 'FFFFFF',
+  dk2: '44546A', tx2: '44546A', lt2: 'E7E6E6', bg2: 'E7E6E6',
+  accent1: '4472C4', accent2: 'ED7D31', accent3: 'A5A5A5', accent4: 'FFC000',
+  accent5: '5B9BD5', accent6: '70AD47', hlink: '0563C1', folHlink: '954F72',
+  phClr: '808080',
+};
+
+const IMG_MIME: Record<string, string> = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+  bmp: 'image/bmp', webp: 'image/webp', svg: 'image/svg+xml',
+};
+
+const EMU_IN = 914400;
+/** Our standard canvas is 10 x 5.63 in (WIDE layout). */
+const CANVAS_W = 10;
+const CANVAS_H = 5.63;
+
+function attr(tag: string, name: string): string | undefined {
+  const m = new RegExp(`\\b${name}="([^"]*)"`).exec(tag);
+  return m ? m[1] : undefined;
+}
+
+/** First explicit color inside an XML fragment (srgbClr, schemeClr or sysClr). */
+function firstColorIn(xml: string): string | undefined {
+  const m =
+    /<a:solidFill>\s*<a:srgbClr\s+val="([0-9A-Fa-f]{6})"/.exec(xml) ??
+    /<a:solidFill>\s*<a:schemeClr\s+val="([a-zA-Z0-9]+)"/.exec(xml);
+  if (m) {
+    const v = SCHEME_COLORS[m[1]] ?? m[1];
+    return `#${v}`;
+  }
+  const sys = /<a:sysClr[^>]*lastClr="([0-9A-Fa-f]{6})"/.exec(xml);
+  return sys ? `#${sys[1]}` : undefined;
+}
+
+interface Geom {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** a:xfrm -> inches on our canvas, scaled from the source slide size. */
+function parseXfrm(block: string, scale: number): Geom | null {
+  const xfrm = /<a:xfrm[^>]*>([\s\S]*?)<\/a:xfrm>/.exec(block);
+  if (!xfrm) return null;
+  const offTag = /<a:off\b[^>]*\/?>/.exec(xfrm[1])?.[0] ?? '';
+  const extTag = /<a:ext\b[^>]*\/?>/.exec(xfrm[1])?.[0] ?? '';
+  const x = attr(offTag, 'x');
+  const y = attr(offTag, 'y');
+  const cx = attr(extTag, 'cx');
+  const cy = attr(extTag, 'cy');
+  if (x === undefined || y === undefined || cx === undefined || cy === undefined) return null;
+  return {
+    x: (parseInt(x, 10) / EMU_IN) * scale,
+    y: (parseInt(y, 10) / EMU_IN) * scale,
+    w: (parseInt(cx, 10) / EMU_IN) * scale,
+    h: (parseInt(cy, 10) / EMU_IN) * scale,
+  };
+}
+
+/** Fallback geometry for placeholders that inherit position from the layout. */
+function placeholderGeom(spXml: string): Geom {
+  const ph = /<p:ph\b([^>]*)\/?>/.exec(spXml)?.[1] ?? '';
+  const type = attr(ph, 'type') ?? 'body';
+  const idx = attr(ph, 'idx');
+  if (type === 'title' || type === 'ctrTitle') return { x: 0.5, y: 0.35, w: 9, h: 1.15 };
+  if (type === 'subTitle' || (type === 'body' && idx === '1')) return { x: 0.8, y: 1.75, w: 8.4, h: 3.4 };
+  if (type === 'sldNum') return { x: 8.9, y: 5.2, w: 0.9, h: 0.35 };
+  return { x: 0.8, y: 1.55, w: 8.4, h: 3.6 };
+}
+
+/** p:txBody -> styled paragraphs. */
+function parseParas(txBody: string): ShapePara[] {
+  const paras: ShapePara[] = [];
+  const pBlocks = txBody.match(/<a:p(?:\s[^>]*)?>[\s\S]*?<\/a:p>/g) ?? [];
+  for (const pb of pBlocks) {
+    const pPrTag = /<a:pPr\b[^>]*?(?:\/>|>)/.exec(pb)?.[0] ?? '';
+    const algn = attr(pPrTag, 'algn');
+    const lvlS = attr(pPrTag, 'lvl');
+    const bullet = /<a:buChar\b/.test(pb) || /<a:buAutoNum\b/.test(pb) ? true : /<a:buNone\b/.test(pb) ? false : undefined;
+    const runs: ShapeRun[] = [];
+    const rBlocks = pb.match(/<a:(?:r|fld)>[\s\S]*?<\/a:(?:r|fld)>/g) ?? [];
+    for (const rb of rBlocks) {
+      const t = /<a:t(?:\s[^>]*)?>([\s\S]*?)<\/a:t>/.exec(rb);
+      const text = decodeXmlEntities(t ? t[1] : '');
+      if (!text) continue;
+      const rPrTag = /<a:rPr\b[^>]*?(?:\/>|>)/.exec(rb)?.[0] ?? '';
+      const szS = attr(rPrTag, 'sz');
+      const color =
+        /<a:solidFill>\s*<a:srgbClr\s+val="([0-9A-Fa-f]{6})"/.exec(rb)?.[1] ??
+        (() => {
+          const sc = /<a:solidFill>\s*<a:schemeClr\s+val="([a-zA-Z0-9]+)"/.exec(rb)?.[1];
+          return sc ? SCHEME_COLORS[sc] : undefined;
+        })();
+      runs.push({
+        text,
+        sz: szS ? parseInt(szS, 10) / 100 : undefined,
+        b: /\bb="1"/.test(rPrTag) || undefined,
+        i: /\bi="1"/.test(rPrTag) || undefined,
+        u: /\bu="(?:sng|dbl)"/.test(rPrTag) || undefined,
+        color: color ? `#${color}` : undefined,
+      });
+    }
+    if (/<a:br\s*\/>/.test(pb)) runs.push({ text: '\n' });
+    const hasText = runs.some((r) => r.text.trim());
+    if (hasText || (runs.length === 0 && paras.length > 0)) {
+      paras.push({
+        runs,
+        align:
+          algn === 'ctr' ? 'center' : algn === 'r' ? 'right' : algn === 'just' ? 'justify' : algn === 'l' ? 'left' : undefined,
+        bullet,
+        level: lvlS ? Math.min(4, parseInt(lvlS, 10)) : 0,
+      });
+    }
+  }
+  while (paras.length && !paras[paras.length - 1].runs.some((r) => r.text.trim())) paras.pop();
+  return paras;
+}
+
+function parseRels(relXml: string): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const tag of relXml.match(/<Relationship\b[^>]*>/g) ?? []) {
+    const id = attr(tag, 'Id');
+    const target = attr(tag, 'Target');
+    if (id && target) map[id] = target;
+  }
+  return map;
+}
+
+/** Resolve an OPC part path relative to a base directory inside the package. */
+function resolvePptPath(baseDir: string, target: string): string {
+  if (target.startsWith('/')) return target.slice(1);
+  const parts = `${baseDir}/${target}`.split('/');
+  const out: string[] = [];
+  for (const p of parts) {
+    if (p === '..') out.pop();
+    else if (p && p !== '.') out.push(p);
+  }
+  return out.join('/');
+}
+
+type PptxZip = { files: Record<string, { async: (t: 'string' | 'base64') => Promise<string> }> };
+
+async function mediaData(zip: PptxZip, target: string): Promise<string | undefined> {
+  const path = resolvePptPath('ppt/slides', target);
+  const f = zip.files[path];
+  if (!f) return undefined;
+  const ext = path.split('.').pop()?.toLowerCase() ?? '';
+  const mime = IMG_MIME[ext];
+  if (!mime) return undefined;
+  const b64 = await f.async('base64');
+  return `data:${mime};base64,${b64}`;
+}
+
+/** Background color of a slide XML, or null when it inherits. */
+function slideBg(xml: string): string | null {
+  const bg = /<p:bg>([\s\S]*?)<\/p:bg>/.exec(xml);
+  return bg ? (firstColorIn(bg[1]) ?? null) : null;
+}
+
+/**
+ * .pptx -> deck slides with faithful shape geometry: positioned text boxes,
+ * fills, per-run formatting, pictures and slide backgrounds.
+ * Falls back to plain title/bullets extraction when nothing parses.
+ */
 export async function importPptx(buf: ArrayBuffer): Promise<DeckSlide[]> {
   const JSZip = (await import('jszip')).default;
   const zip = await JSZip.loadAsync(buf);
@@ -340,18 +548,100 @@ export async function importPptx(buf: ArrayBuffer): Promise<DeckSlide[]> {
       const nb = parseInt(b.replace(/\D+/g, ''), 10);
       return na - nb;
     });
+
+  // Slide size -> uniform scale onto our 10 x 5.63 canvas.
+  let srcW = 12192000;
+  let srcH = 6858000;
+  try {
+    const presXml = await zip.files['ppt/presentation.xml']?.async('text');
+    const sz = presXml ? /<p:sldSz\b[^>]*\/?>/.exec(presXml)?.[0] : undefined;
+    if (sz) {
+      srcW = parseInt(attr(sz, 'cx') ?? '', 10) || srcW;
+      srcH = parseInt(attr(sz, 'cy') ?? '', 10) || srcH;
+    }
+  } catch {
+    /* defaults fine */
+  }
+  const scale = Math.min(CANVAS_W / (srcW / EMU_IN), CANVAS_H / (srcH / EMU_IN));
+  const cw = (srcW / EMU_IN) * scale;
+  const ch = (srcH / EMU_IN) * scale;
+
   const slides: DeckSlide[] = [];
   for (const n of names) {
     const xml = await zip.files[n].async('text');
-    const texts = Array.from(xml.matchAll(/<a:t>([^<]*)<\/a:t>/g))
-      .map((m) => decodeXmlEntities(m[1]).trim())
-      .filter(Boolean);
-    slides.push({ title: texts[0] ?? 'Slide', bullets: texts.slice(1) });
+    const relPath = `ppt/slides/_rels/${n.split('/').pop()}.rels`;
+    let rels: Record<string, string> = {};
+    if (zip.files[relPath]) rels = parseRels(await zip.files[relPath].async('text'));
+
+    let bg = slideBg(xml);
+    if (!bg) {
+      // inherit from slide layout, then its master
+      const layoutTarget = Object.entries(rels).find(([, t]) => t.includes('slideLayout'))?.[1];
+      if (layoutTarget) {
+        const lp = resolvePptPath('ppt/slides', layoutTarget);
+        const lxml = zip.files[lp] ? await zip.files[lp].async('text') : '';
+        bg = lxml ? slideBg(lxml) : null;
+        if (!bg && lxml) {
+          const lRelPath = `${lp.replace('ppt/', 'ppt/_rels/')}.rels`;
+          const lRels = zip.files[lRelPath] ? parseRels(await zip.files[lRelPath].async('text')) : {};
+          const mTarget = Object.entries(lRels).find(([, t]) => t.includes('slideMaster'))?.[1];
+          if (mTarget) {
+            const mp = resolvePptPath('ppt/slideLayouts', mTarget);
+            const mxml = zip.files[mp] ? await zip.files[mp].async('text') : '';
+            bg = mxml ? slideBg(mxml) : null;
+          }
+        }
+      }
+    }
+
+    const shapes: SlideShape[] = [];
+    for (const sp of xml.match(/<p:sp>[\s\S]*?<\/p:sp>/g) ?? []) {
+      const geom = parseXfrm(sp, scale) ?? placeholderGeom(sp);
+      const spPr = /<p:spPr\b[^>]*>([\s\S]*?)<\/p:spPr>/.exec(sp)?.[1] ?? '';
+      const fill = firstColorIn(spPr.replace(/<a:ln\b[\s\S]*$/, '')); // fill only, not outline
+      const lineM = /<a:ln\b[^>]*>[\s\S]*?<a:solidFill>\s*<a:srgbClr\s+val="([0-9A-Fa-f]{6})"/.exec(spPr);
+      const paras = parseParas(/<p:txBody\b[^>]*>([\s\S]*?)<\/p:txBody>/.exec(sp)?.[1] ?? '');
+      const isText = paras.length > 0;
+      const isPlaceholder = /<p:ph\b/.test(sp);
+      if (!isText && !fill && !isPlaceholder) continue; // empty decorative box
+      shapes.push({
+        ...geom,
+        kind: isText ? 'text' : 'shape',
+        paras,
+        fill,
+        line: lineM ? `#${lineM[1]}` : undefined,
+      });
+    }
+    for (const pic of xml.match(/<p:pic>[\s\S]*?<\/p:pic>/g) ?? []) {
+      const geom = parseXfrm(pic, scale);
+      const embed = /\br:(?:embed|link)="([^"]+)"/.exec(pic)?.[1];
+      if (!geom || !embed) continue;
+      const img = await mediaData(zip, rels[embed] ?? '');
+      if (img) shapes.push({ ...geom, kind: 'image', paras: [], img });
+    }
+
+    // Title: first paragraph of the first text shape; bullets follow it.
+    const firstText = shapes.find((s) => s.kind === 'text' && s.paras.some((p) => p.runs.some((r) => r.text.trim())));
+    const firstLine = firstText?.paras.find((p) => p.runs.some((r) => r.text.trim()));
+    const title = firstLine?.runs.map((r) => r.text).join('').trim() ?? '';
+    const bullets = (firstText?.paras.slice(1) ?? [])
+      .map((p) => p.runs.map((r) => r.text).join('').trim())
+      .filter(Boolean)
+      .slice(0, 12);
+
+    slides.push({
+      title: title || 'Slide',
+      bullets: bullets.length ? bullets : [''],
+      bg: bg ?? undefined,
+      shapes,
+      cw,
+      ch,
+    });
   }
   return slides;
 }
 
-/** Deck slides -> real .pptx file (pptxgenjs), honoring layouts, theme and images. */
+/** Deck slides -> real .pptx file (pptxgenjs), honoring layouts, theme, shapes and images. */
 export async function exportPptx(title: string, slides: DeckSlide[]): Promise<Uint8Array> {
   const PptxGenJS = (await import('pptxgenjs')).default;
   const pptx = new PptxGenJS();
@@ -362,6 +652,56 @@ export async function exportPptx(title: string, slides: DeckSlide[]): Promise<Ui
     const slide = pptx.addSlide();
     const dark = isDarkColor(s.bg);
     if (s.bg) slide.background = { color: s.bg.replace('#', '') };
+
+    // Faithful path: slides that carry imported/positioned shapes.
+    if (s.shapes && s.shapes.length > 0) {
+      const offX = Math.max(0, (10 - (s.cw ?? 10)) / 2);
+      for (const sh of s.shapes) {
+        const x = sh.x + offX;
+        if (sh.kind === 'image' && sh.img) {
+          slide.addImage({ data: sh.img, x, y: sh.y, w: sh.w, h: sh.h });
+          continue;
+        }
+        const fill = sh.fill ? { color: sh.fill.replace('#', '') } : undefined;
+        const items = sh.paras.flatMap((p) => {
+          if (p.runs.length === 0) {
+            return [{ text: ' ', options: { breakLine: true, fontSize: 8 } }];
+          }
+          return p.runs.map((r, ri) => ({
+            text: r.text,
+            options: {
+              fontSize: r.sz ?? 14,
+              bold: r.b,
+              italic: r.i,
+              underline: r.u ? { style: 'sng' as const } : undefined,
+              color: (r.color ?? (dark ? 'FFFFFF' : '333333')).replace('#', ''),
+              align: p.align,
+              bullet: p.bullet ? { characterCode: '2022', indent: 12 + (p.level ?? 0) * 18 } : p.bullet === false ? false : undefined,
+              indentLevel: p.level,
+              breakLine: ri === p.runs.length - 1,
+            },
+          }));
+        });
+        if (items.length === 0) {
+          if (fill) {
+            slide.addShape(pptx.ShapeType.rect, {
+              x, y: sh.y, w: sh.w, h: sh.h, fill,
+              line: sh.line ? { color: sh.line.replace('#', '') } : undefined,
+            });
+          }
+        } else {
+          slide.addText(items as never, {
+            x, y: sh.y, w: sh.w, h: sh.h,
+            valign: 'top',
+            fill,
+            fontSize: 14,
+            color: dark ? 'FFFFFF' : '333333',
+          });
+        }
+      }
+      continue;
+    }
+
     const accent = (s.accent ?? '#C43E1C').replace('#', '');
     const main = dark ? 'FFFFFF' : '1F2430';
     const body = dark ? 'E8E8E8' : '333333';

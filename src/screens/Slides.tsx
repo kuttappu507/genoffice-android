@@ -1,10 +1,94 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { FileTypeIcon } from '../components/Icon';
 import { Palette, RBtn, RGroup, RWide } from '../components/Ribbon';
 import { chatStream, errMsg } from '../lib/ai-client';
 import { exportPptx, importPptx, openFilePicker, pickImage, saveBinary, sanitizeName } from '../lib/fileio';
-import type { DeckSlide } from '../lib/fileio';
+import type { DeckSlide, ShapePara } from '../lib/fileio';
 import { debounce, getDoc, getSettings, putDoc, uid } from '../lib/storage';
+
+const alignCss = (a: ShapePara['align']): CSSProperties['textAlign'] =>
+  a === 'center' ? 'center' : a === 'right' ? 'right' : a === 'justify' ? 'justify' : 'left';
+
+/**
+ * Faithful slide renderer: absolutely-positioned shapes on a cw x ch inch
+ * canvas, scaled from inches to pixels. Used by the editor canvas, the
+ * filmstrip thumbnails and present mode so all views match the real deck.
+ */
+export function SlideView({
+  slide,
+  width,
+  editShapes,
+  onShapeTap,
+  selectedShape,
+}: {
+  slide: DeckSlide;
+  width: number;
+  editShapes?: boolean;
+  onShapeTap?: (idx: number) => void;
+  selectedShape?: number | null;
+}) {
+  const cw = slide.cw ?? 10;
+  const ch = slide.ch ?? 5.63;
+  const dark = /^#[0-9a-fA-F]{6}$/.test(slide.bg ?? '')
+    ? (0.299 * parseInt(slide.bg!.slice(1, 3), 16) + 0.587 * parseInt(slide.bg!.slice(3, 5), 16) + 0.114 * parseInt(slide.bg!.slice(5, 7), 16)) < 140
+    : false;
+  if (width <= 0) return null;
+  const ptScale = width / (cw * 72); // px per point
+  return (
+    <div className="sv" style={{ width, height: (width * ch) / cw, background: slide.bg ?? '#FFFFFF' }}>
+      {(slide.shapes ?? []).map((sh, i) => {
+        const style: CSSProperties = {
+          left: `${(sh.x / cw) * 100}%`,
+          top: `${(sh.y / ch) * 100}%`,
+          width: `${(sh.w / cw) * 100}%`,
+          height: `${(sh.h / ch) * 100}%`,
+          background: sh.fill,
+          border: sh.line ? `1px solid ${sh.line}` : undefined,
+        };
+        if (sh.kind === 'image' && sh.img) {
+          return (
+            <div key={i} className="sv-sh img" style={style}>
+              <img src={sh.img} alt="" draggable={false} />
+            </div>
+          );
+        }
+        return (
+          <div
+            key={i}
+            className={`sv-sh${editShapes && onShapeTap ? ' tappable' : ''}${selectedShape === i ? ' sel' : ''}`}
+            style={style}
+            onClick={editShapes && onShapeTap ? () => onShapeTap(i) : undefined}
+          >
+            {sh.paras.map((p, j) => {
+              const text = p.runs.map((r) => r.text).join('');
+              const first = p.runs.find((r) => r.text.trim()) ?? p.runs[0];
+              if (!text.trim()) return <p key={j} style={{ fontSize: Math.max(5, (first?.sz ?? 14) * ptScale) }}>\u00a0</p>;
+              return (
+                <p
+                  key={j}
+                  style={{
+                    fontSize: Math.max(5, (first?.sz ?? 14) * ptScale),
+                    color: first?.color ?? (dark ? '#F2F2F2' : '#333333'),
+                    fontWeight: p.runs.some((r) => r.b) ? 700 : 400,
+                    fontStyle: p.runs.some((r) => r.i) ? 'italic' : undefined,
+                    textDecoration: p.runs.some((r) => r.u) ? 'underline' : undefined,
+                    textAlign: alignCss(p.align),
+                    paddingLeft: p.bullet ? `${1 + (p.level ?? 0) * 0.9}em` : undefined,
+                    textIndent: p.bullet ? '-0.75em' : undefined,
+                  }}
+                >
+                  {p.bullet ? '\u2022 ' : ''}
+                  {text}
+                </p>
+              );
+            })}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 type RibbonTab = 'home' | 'insert' | 'design' | 'ai';
 
@@ -42,6 +126,36 @@ export default function Slides({ initialId, onExit }: { initialId?: string; onEx
   const [aiTopic, setAiTopic] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
   const [toast, setToast] = useState('');
+  const [shapeEdit, setShapeEdit] = useState<number | null>(null);
+  const [shapeText, setShapeText] = useState('');
+  const [canvasW, setCanvasW] = useState(0);
+  const [presW, setPresW] = useState(0);
+  const canvasHolderRef = useRef<HTMLDivElement>(null);
+
+  // keep the shape canvas sized to its container
+  useEffect(() => {
+    const el = canvasHolderRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setCanvasW(el.clientWidth));
+    ro.observe(el);
+    setCanvasW(el.clientWidth);
+    return () => ro.disconnect();
+  }, [sel, presenting, slides.length]);
+
+  // fit the present-mode slide to the viewport
+  useEffect(() => {
+    if (!presenting) return;
+    const calc = () => {
+      const s = slides[presIdx];
+      const cw = s?.cw ?? 10;
+      const ch = s?.ch ?? 5.63;
+      const w = Math.min(window.innerWidth - 10, ((window.innerHeight - 70) * cw) / ch);
+      setPresW(Math.max(120, w));
+    };
+    calc();
+    window.addEventListener('resize', calc);
+    return () => window.removeEventListener('resize', calc);
+  }, [presenting, presIdx, slides]);
 
   const save = useMemo(
     () =>
@@ -69,10 +183,41 @@ export default function Slides({ initialId, onExit }: { initialId?: string; onEx
   const duplicateSlide = () => {
     const cur = slides[sel];
     if (!cur) return;
+    const copy: DeckSlide = {
+      ...cur,
+      bullets: [...cur.bullets],
+      shapes: cur.shapes?.map((sh) => ({ ...sh, paras: sh.paras.map((p) => ({ ...p, runs: p.runs.map((r) => ({ ...r })) })) })),
+    };
     const next = [...slides];
-    next.splice(sel + 1, 0, { ...cur, bullets: [...cur.bullets] });
+    next.splice(sel + 1, 0, copy);
     update(next);
     setSel(sel + 1);
+  };
+
+  const openShapeEdit = (idx: number) => {
+    const sh = slides[sel]?.shapes?.[idx];
+    if (!sh) return;
+    setShapeText(sh.paras.map((p) => p.runs.map((r) => r.text).join('')).join('\n'));
+    setShapeEdit(idx);
+  };
+
+  const saveShapeEdit = () => {
+    const cur = slides[sel];
+    if (shapeEdit === null || !cur?.shapes) return;
+    const sh = cur.shapes[shapeEdit];
+    const lines = shapeText.split('\n');
+    const paras: ShapePara[] = lines.map((ln, i) => {
+      const old = sh.paras[i] ?? sh.paras[0];
+      const base = old?.runs[0];
+      return {
+        align: old?.align,
+        bullet: old?.bullet,
+        level: old?.level,
+        runs: [{ ...(base ?? { sz: 14 }), text: ln } as ShapePara['runs'][number]],
+      };
+    });
+    editSel({ shapes: cur.shapes.map((s, i) => (i === shapeEdit ? { ...s, paras } : s)) });
+    setShapeEdit(null);
   };
 
   const move = (from: number, dir: -1 | 1) => {
@@ -199,18 +344,24 @@ export default function Slides({ initialId, onExit }: { initialId?: string; onEx
           className="present-content"
           style={{ background: s.bg ?? '#FFFFFF', color: dark ? '#F2F2F2' : '#1B1B1B' }}
         >
-          {(s.layout === 'section') && <div className="present-band" style={{ background: accent }} />}
-          <h2 style={s.layout === 'title' || s.layout === 'section' ? { textAlign: 'center', color: dark ? '#FFFFFF' : '#1B1B1B' } : undefined}>
-            {s.title}
-          </h2>
-          {s.layout !== 'section' && (
-            <ul>
-              {s.bullets.filter((b) => b.trim()).map((b, i) => (
-                <li key={i} style={s.layout === 'title' ? { listStyle: 'none', textAlign: 'center', color: accent, marginLeft: -20 } : undefined}>
-                  {b}
-                </li>
-              ))}
-            </ul>
+          {s.shapes && s.shapes.length > 0 ? (
+            <SlideView slide={s} width={presW} />
+          ) : (
+            <>
+              {(s.layout === 'section') && <div className="present-band" style={{ background: accent }} />}
+              <h2 style={s.layout === 'title' || s.layout === 'section' ? { textAlign: 'center', color: dark ? '#FFFFFF' : '#1B1B1B' } : undefined}>
+                {s.title}
+              </h2>
+              {s.layout !== 'section' && (
+                <ul>
+                  {s.bullets.filter((b) => b.trim()).map((b, i) => (
+                    <li key={i} style={s.layout === 'title' ? { listStyle: 'none', textAlign: 'center', color: accent, marginLeft: -20 } : undefined}>
+                      {b}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
           )}
         </div>
         <div className="present-bar">
@@ -289,6 +440,15 @@ export default function Slides({ initialId, onExit }: { initialId?: string; onEx
           <div className="deck-empty">
             <FileTypeIcon kind="deck" size={54} />
             <p>No slides yet. Use Home → New slide, or generate an AI outline.</p>
+          </div>
+        ) : cur?.shapes && cur.shapes.length > 0 ? (
+          <div
+            className="shape-canvas-holder"
+            ref={canvasHolderRef}
+            style={{ borderColor: cur.accent ?? 'var(--ppt)' }}
+          >
+            <SlideView slide={cur} width={Math.min(canvasW, 620)} editShapes onShapeTap={openShapeEdit} />
+            <p className="shape-hint">Tap any text box to edit it — layout, colors and images stay exactly as designed.</p>
           </div>
         ) : (
           cur && (
@@ -496,11 +656,17 @@ export default function Slides({ initialId, onExit }: { initialId?: string; onEx
             style={{ background: s.bg ?? '#FFFFFF' }}
             onClick={() => setSel(i)}
           >
+            {s.shapes && s.shapes.length > 0 ? (
+              <span className="thumb-sv" aria-hidden="true">
+                <SlideView slide={s} width={96} />
+              </span>
+            ) : (
+              <span className="slide-thumb-title" style={{ color: isDark(s.bg ?? '#FFFFFF') ? '#F0F0F0' : 'inherit' }}>
+                {s.title || 'Untitled'}
+              </span>
+            )}
             <span className="slide-num" style={{ color: isDark(s.bg ?? '#FFFFFF') ? 'rgba(255,255,255,0.65)' : '#9a9a9a' }}>
               {i + 1}
-            </span>
-            <span className="slide-thumb-title" style={{ color: isDark(s.bg ?? '#FFFFFF') ? '#F0F0F0' : 'inherit' }}>
-              {s.title || 'Untitled'}
             </span>
           </button>
         ))}
@@ -508,6 +674,29 @@ export default function Slides({ initialId, onExit }: { initialId?: string; onEx
           +
         </button>
       </div>
+
+      {shapeEdit !== null && (
+        <div className="modal" onClick={() => setShapeEdit(null)}>
+          <div className="modal-body" onClick={(e) => e.stopPropagation()}>
+            <h3>Edit text box</h3>
+            <p className="hint">One line per paragraph. Font, color and position are kept.</p>
+            <textarea
+              className="input shape-input"
+              value={shapeText}
+              rows={5}
+              onChange={(e) => setShapeText(e.target.value)}
+            />
+            <div className="btn-row">
+              <button className="btn primary" onClick={saveShapeEdit}>
+                Apply
+              </button>
+              <button className="btn" onClick={() => setShapeEdit(null)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {aiOpen && (
         <div className="modal" onClick={() => !aiBusy && setAiOpen(false)}>

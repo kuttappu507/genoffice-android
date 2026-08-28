@@ -29,6 +29,14 @@ export function RGroup({ label, children }: { label: string; children: ReactNode
 }
 
 export function RBtn({ icon, label, onRun, active, disabled, keepFocus, colorBar }: RBtnDef) {
+  // preventDefault on pointerdown/mousedown stops the button from stealing
+  // focus — on Android the contentEditable would otherwise blur and lose the
+  // selection before the command runs.
+  const guard = keepFocus
+    ? (e: React.SyntheticEvent) => {
+        e.preventDefault();
+      }
+    : undefined;
   return (
     <button
       className={`rbtn${active ? ' active' : ''}${label ? ' labeled' : ''}`}
@@ -36,7 +44,8 @@ export function RBtn({ icon, label, onRun, active, disabled, keepFocus, colorBar
       aria-label={label}
       aria-pressed={active}
       disabled={disabled}
-      onMouseDown={keepFocus ? (e) => e.preventDefault() : undefined}
+      onPointerDown={guard}
+      onMouseDown={guard}
       onClick={onRun}
     >
       <Icon name={icon} size={19} />
@@ -89,10 +98,11 @@ export const PALETTE = [
 ];
 
 export function Palette({ onPick, auto }: { onPick: (c: string) => void; auto?: () => void }) {
+  const guard = (e: React.SyntheticEvent) => e.preventDefault();
   return (
     <div className="palette-row">
       {auto && (
-        <button className="swatch auto" aria-label="Automatic / no color" onMouseDown={(e) => e.preventDefault()} onClick={auto}>
+        <button className="swatch auto" aria-label="Automatic / no color" onPointerDown={guard} onMouseDown={guard} onClick={auto}>
           <Icon name="close" size={12} />
         </button>
       )}
@@ -102,7 +112,8 @@ export function Palette({ onPick, auto }: { onPick: (c: string) => void; auto?: 
           className="swatch"
           style={{ background: c }}
           aria-label={`Color ${c}`}
-          onMouseDown={(e) => e.preventDefault()}
+          onPointerDown={guard}
+          onMouseDown={guard}
           onClick={() => onPick(c)}
         />
       ))}
