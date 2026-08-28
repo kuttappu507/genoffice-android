@@ -261,8 +261,62 @@ export async function exportXlsx(title: string, cells: Record<string, string>): 
 }
 
 // ---------------------------------------------------------------------------
+// Images
+// ---------------------------------------------------------------------------
+
+/** Pick an image from the device and return a downscaled JPEG data URL. */
+export async function pickImage(maxDim = 1280): Promise<string | null> {
+  const pick = await openFilePicker('image/*');
+  if (!pick) return null;
+  const url = URL.createObjectURL(new Blob([pick.buf as BlobPart]));
+  try {
+    const img = await new Promise<HTMLImageElement>((res, rej) => {
+      const i = new Image();
+      i.onload = () => res(i);
+      i.onerror = () => rej(new Error('Not a valid image'));
+      i.src = url;
+    });
+    const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+    const w = Math.max(1, Math.round(img.width * scale));
+    const h = Math.max(1, Math.round(img.height * scale));
+    const cv = document.createElement('canvas');
+    cv.width = w;
+    cv.height = h;
+    const ctx = cv.getContext('2d');
+    if (!ctx) throw new Error('Canvas is unavailable');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+    return cv.toDataURL('image/jpeg', 0.85);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/** Rough luminance test so text stays readable on colored slide backgrounds. */
+export function isDarkColor(hex?: string): boolean {
+  if (!hex || !/^#[0-9a-fA-F]{6}$/.test(hex)) return false;
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return 0.299 * r + 0.587 * g + 0.114 * b < 140;
+}
+
+// ---------------------------------------------------------------------------
 // PowerPoint (.pptx)
 // ---------------------------------------------------------------------------
+
+export interface DeckSlide {
+  title: string;
+  bullets: string[];
+  /** slide background color (#rrggbb) */
+  bg?: string;
+  /** accent color for bars / highlights (#rrggbb) */
+  accent?: string;
+  /** image placed on the slide (data URL) */
+  image?: string;
+  layout?: 'title' | 'content' | 'section' | 'blank';
+}
 
 function decodeXmlEntities(s: string): string {
   return s
@@ -276,7 +330,7 @@ function decodeXmlEntities(s: string): string {
 }
 
 /** .pptx -> deck slides (title = first text box, bullets = the rest). */
-export async function importPptx(buf: ArrayBuffer): Promise<{ title: string; bullets: string[] }[]> {
+export async function importPptx(buf: ArrayBuffer): Promise<DeckSlide[]> {
   const JSZip = (await import('jszip')).default;
   const zip = await JSZip.loadAsync(buf);
   const names = Object.keys(zip.files)
@@ -286,7 +340,7 @@ export async function importPptx(buf: ArrayBuffer): Promise<{ title: string; bul
       const nb = parseInt(b.replace(/\D+/g, ''), 10);
       return na - nb;
     });
-  const slides: { title: string; bullets: string[] }[] = [];
+  const slides: DeckSlide[] = [];
   for (const n of names) {
     const xml = await zip.files[n].async('text');
     const texts = Array.from(xml.matchAll(/<a:t>([^<]*)<\/a:t>/g))
@@ -297,31 +351,53 @@ export async function importPptx(buf: ArrayBuffer): Promise<{ title: string; bul
   return slides;
 }
 
-/** Deck slides -> real .pptx file (pptxgenjs). */
-export async function exportPptx(
-  title: string,
-  slides: { title: string; bullets: string[] }[],
-): Promise<Uint8Array> {
+/** Deck slides -> real .pptx file (pptxgenjs), honoring layouts, theme and images. */
+export async function exportPptx(title: string, slides: DeckSlide[]): Promise<Uint8Array> {
   const PptxGenJS = (await import('pptxgenjs')).default;
   const pptx = new PptxGenJS();
   pptx.title = title;
+  pptx.defineLayout({ name: 'WIDE', width: 10, height: 5.63 });
+  pptx.layout = 'WIDE';
   for (const s of slides) {
     const slide = pptx.addSlide();
-    slide.addText(s.title || 'Slide', {
-      x: 0.6,
-      y: 0.4,
-      w: 8.8,
-      h: 1.2,
-      fontSize: 28,
-      bold: true,
-      color: '1F2430',
-    });
-    const lines = s.bullets.filter((b) => b.trim());
-    if (lines.length) {
-      slide.addText(
-        lines.map((t) => ({ text: t, options: { bullet: true, fontSize: 16 } })),
-        { x: 0.8, y: 1.9, w: 8.3, h: 4.6, color: '333333' },
-      );
+    const dark = isDarkColor(s.bg);
+    if (s.bg) slide.background = { color: s.bg.replace('#', '') };
+    const accent = (s.accent ?? '#C43E1C').replace('#', '');
+    const main = dark ? 'FFFFFF' : '1F2430';
+    const body = dark ? 'E8E8E8' : '333333';
+    if (s.layout === 'title') {
+      slide.addText(s.title || title, {
+        x: 0.5, y: 2.1, w: 9, h: 1.3, fontSize: 34, bold: true, color: main, align: 'center',
+      });
+      const sub = s.bullets.find((b) => b.trim());
+      if (sub) {
+        slide.addText(sub, { x: 0.5, y: 3.45, w: 9, h: 0.7, fontSize: 17, color: accent, align: 'center' });
+      }
+    } else if (s.layout === 'section') {
+      slide.addShape(pptx.ShapeType.rect, { x: 0, y: 2.3, w: 10, h: 1.05, fill: { color: accent } });
+      slide.addText(s.title || 'Section', {
+        x: 0.5, y: 2.34, w: 9, h: 0.97, fontSize: 27, bold: true, color: 'FFFFFF', align: 'center',
+      });
+    } else if (s.layout === 'blank') {
+      if (s.image) {
+        slide.addImage({ data: s.image, x: 0.5, y: 0.4, w: 9, h: 4.85, sizing: { type: 'contain', w: 9, h: 4.85 } });
+      }
+    } else {
+      slide.addText(s.title || 'Slide', {
+        x: 0.6, y: 0.35, w: 8.8, h: 1.1, fontSize: 27, bold: true, color: main,
+      });
+      slide.addShape(pptx.ShapeType.rect, { x: 0.62, y: 1.42, w: 1.6, h: 0.06, fill: { color: accent } });
+      const wide = s.image ? 4.9 : 8.3;
+      const lines = s.bullets.filter((b) => b.trim());
+      if (lines.length) {
+        slide.addText(
+          lines.map((t) => ({ text: t, options: { bullet: true, fontSize: 15 } })),
+          { x: 0.8, y: 1.75, w: wide, h: 3.6, color: body },
+        );
+      }
+    }
+    if (s.image && s.layout !== 'blank') {
+      slide.addImage({ data: s.image, x: 5.85, y: 1.8, w: 3.6, h: 2.7, sizing: { type: 'contain', w: 3.6, h: 2.7 } });
     }
   }
   const out = (await pptx.write({ outputType: 'arraybuffer' })) as ArrayBuffer;

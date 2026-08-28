@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import type { DocKind } from '../types';
-import { Icon, FileTypeIcon } from '../components/Icon';
-import { getSettings, listDocs, putDoc, uid } from '../lib/storage';
+import { FileTypeIcon, Icon } from '../components/Icon';
+import { getSettings, listDocs, putDoc, removeDoc, uid } from '../lib/storage';
 import { errMsg } from '../lib/ai-client';
 import { baseName, importDocx, importPptx, importSpreadsheet, openFilePicker, textToHtml } from '../lib/fileio';
 
@@ -27,8 +27,8 @@ export default function Home({
   onOpen: (kind: DocKind, id: string) => void;
   onGo: (tab: 'chat' | 'docs' | 'sheets' | 'slides' | 'settings') => void;
 }) {
-  const recent = useMemo(() => listDocs().slice(0, 12), []);
-  const settings = useMemo(() => getSettings(), []);
+  const [recent, setRecent] = useState(() => listDocs().slice(0, 12));
+  const settings = useState(() => getSettings())[0];
   const configured = settings.apiKey.trim().length > 0;
   const [opening, setOpening] = useState(false);
   const [openErr, setOpenErr] = useState('');
@@ -106,9 +106,7 @@ export default function Home({
       )}
 
       <button className="openfile" onClick={() => void openAny()} disabled={opening}>
-        <span className="openfile-icon">
-          <Icon name="folder" size={22} />
-        </span>
+        <span className="openfile-icon">≡</span>
         <span className="openfile-text">
           <strong>{opening ? 'Opening…' : 'Open a file'}</strong>
           <span>.docx · .xlsx · .csv · .pptx · .txt · .md</span>
@@ -138,11 +136,25 @@ export default function Home({
       ) : (
         <div className="list">
           {recent.map((d) => (
-            <button key={d.id} className="list-row" onClick={() => onOpen(d.kind, d.id)}>
-              <FileTypeIcon kind={d.kind} size={32} />
-              <span className="list-title">{d.title}</span>
-              <span className="list-time">{ago(d.updated)}</span>
-            </button>
+            <div key={d.id} className="list-row">
+              <button className="list-main" onClick={() => onOpen(d.kind, d.id)}>
+                <FileTypeIcon kind={d.kind} size={32} />
+                <span className="list-title">{d.title}</span>
+                <span className="list-time">{ago(d.updated)}</span>
+              </button>
+              <button
+                className="icon-btn list-del"
+                aria-label={`Delete ${d.title}`}
+                onClick={() => {
+                  if (window.confirm(`Delete "${d.title}"? This cannot be undone.`)) {
+                    removeDoc(d.id);
+                    setRecent(listDocs().slice(0, 12));
+                  }
+                }}
+              >
+                ×
+              </button>
+            </div>
           ))}
         </div>
       )}

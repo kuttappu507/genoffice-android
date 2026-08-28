@@ -436,10 +436,10 @@ svg.dim {
 
 .ribbon-row {
   display: flex;
-  align-items: center;
-  gap: 1px;
+  align-items: stretch;
+  gap: 0;
   overflow-x: auto;
-  padding: 6px 8px;
+  padding: 4px 6px;
   scrollbar-width: none;
 }
 
@@ -447,19 +447,85 @@ svg.dim {
   display: none;
 }
 
+/* labeled button groups, like the Word/Excel mobile command tray */
+.rgroup {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 3px 7px;
+  border-right: 1px solid var(--line);
+}
+
+.rgroup:last-child {
+  border-right: none;
+}
+
+.rgroup-row {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.rgroup-label {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-align: center;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+
+.rselect {
+  height: 40px;
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  background: #ffffff;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0 4px;
+  max-width: 132px;
+  outline: none;
+}
+
 .rbtn {
   flex: 0 0 auto;
-  width: 41px;
-  height: 41px;
+  width: 46px;
+  height: 48px;
   display: inline-flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: 1px;
   background: none;
   border: 1px solid transparent;
   border-radius: 4px;
   color: #3d3d3d;
   cursor: pointer;
+  padding: 2px;
+}
+
+.rbtn-label {
+  max-width: 46px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 8.5px;
+  font-weight: 600;
+  color: var(--text-dim);
+  line-height: 1.15;
+}
+
+.rbtn.active .rbtn-label {
+  color: var(--app);
+}
+
+.color-bar {
+  width: 18px;
+  height: 3.5px;
+  border-radius: 2px;
+  margin-top: -1px;
 }
 
 .rbtn:active {
@@ -478,6 +544,9 @@ svg.dim {
 
 .rbtn.wide {
   width: auto;
+  height: 42px;
+  flex-direction: row;
+  gap: 6px;
   padding: 0 13px;
   color: var(--app);
 }
@@ -485,6 +554,54 @@ svg.dim {
 .rbtn.wide span {
   font-size: 12.5px;
   font-weight: 600;
+  white-space: nowrap;
+}
+
+.theme-chips {
+  display: flex;
+  gap: 6px;
+  padding: 3px 0;
+}
+
+.theme-chip {
+  width: 42px;
+  height: 32px;
+  border-radius: 5px;
+  border: 2px solid var(--line-2);
+  background: none;
+  padding: 2px;
+  cursor: pointer;
+}
+
+.theme-chip.active {
+  border-color: var(--app);
+}
+
+.chip-bg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 3px;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.chip-accent {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 32%;
+}
+
+.swatch.auto {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #ffffff;
+  border: 1.5px solid var(--line-2);
+  color: var(--text-dim);
 }
 
 .rdiv {
@@ -643,16 +760,18 @@ svg.dim {
 }
 
 .namebox {
-  min-width: 54px;
+  min-width: 62px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0 9px;
+  border: none;
   border-right: 1px solid var(--line);
   background: #fafafa;
   color: var(--excel);
   font-size: 13px;
   font-weight: 700;
+  cursor: pointer;
 }
 
 .fx {
@@ -765,6 +884,7 @@ svg.dim {
 }
 
 .stab {
+  flex: 0 0 auto;
   background: none;
   border: none;
   border-bottom: 2.5px solid transparent;
@@ -772,6 +892,36 @@ svg.dim {
   font-size: 12.5px;
   font-weight: 600;
   padding: 0 16px;
+  white-space: nowrap;
+}
+
+.stab-scroll {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.stab-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.stab-add {
+  flex: 0 0 auto;
+  width: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 17px;
+}
+
+.menu.up {
+  top: auto;
+  bottom: calc(100% + 6px);
 }
 
 .stab.active {
@@ -780,14 +930,85 @@ svg.dim {
   background: #f0f7f3;
 }
 
-.stab-add {
-  width: 36px;
-  display: inline-flex;
+.cell.range {
+  background: #e9f3ec;
+}
+
+/* ============================== find & replace ============================== */
+
+.findbar {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line);
+  padding: 9px 10px;
+}
+
+.find-input {
+  padding: 8px 10px;
+  font-size: 14px;
+}
+
+.find-ops {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  background: none;
-  border: none;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.find-ops .btn.small {
+  min-width: 38px;
+}
+
+.find-count {
   color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 700;
+  margin-left: 2px;
+}
+
+mark.find-hit {
+  background: #ffe47a;
+  color: inherit;
+  padding: 0;
+}
+
+mark.find-hit.cur {
+  background: #ffb247;
+  outline: 2px solid #e8890c;
+}
+
+/* floating selection toolbar (Word mobile) */
+.selbar {
+  position: fixed;
+  z-index: 80;
+  display: flex;
+  gap: 1px;
+  padding: 3px;
+  background: #ffffff;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  box-shadow: var(--shadow-2);
+  transform: translateX(-50%);
+}
+
+.selbar .icon-btn {
+  width: 36px;
+  height: 36px;
+  font-size: 15px;
+}
+
+.selbar .aa {
+  font-weight: 700;
+  color: var(--word);
+}
+
+.paper img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 3px;
 }
 
 /* ============================== PowerPoint ============================== */
@@ -840,6 +1061,94 @@ svg.dim {
   right: 8px;
   font-size: 10.5px;
   color: #9a9a9a;
+}
+
+.title-wrap {
+  margin: auto;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.canvas-title.xl {
+  font-size: 24px;
+  text-align: center;
+  border-bottom: none;
+}
+
+.canvas-sub {
+  border: none;
+  outline: none;
+  background: none;
+  width: 100%;
+  text-align: center;
+  font-size: 14px;
+  color: var(--ppt);
+  padding: 4px 0;
+}
+
+.canvas-sub::placeholder {
+  color: #b0b0b0;
+}
+
+.section-band {
+  margin: auto 0;
+  width: calc(100% + 32px);
+  margin-left: -16px;
+  padding: 18px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.canvas-title.onband {
+  color: #ffffff;
+  text-align: center;
+  font-size: 21px;
+  border-bottom: none;
+}
+
+.canvas-title.onband::placeholder {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.title-rule {
+  width: 64px;
+  height: 4px;
+  border-radius: 2px;
+  margin: 0 0 4px;
+  flex: 0 0 auto;
+}
+
+.canvas-img {
+  position: absolute;
+  right: 12px;
+  top: 16%;
+  max-width: 40%;
+  max-height: 66%;
+  object-fit: contain;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+.slide-canvas.imgright .canvas-title,
+.slide-canvas.imgright .title-rule,
+.slide-canvas.imgright .canvas-bullets {
+  width: 56%;
+}
+
+.blank-hint {
+  margin: auto;
+  font-size: 13px;
+}
+
+.present-band {
+  height: 10px;
+  width: 120px;
+  margin: 0 auto 16px;
+  border-radius: 4px;
 }
 
 .canvas-title {
@@ -1249,15 +1558,42 @@ svg.dim {
 .list-row {
   display: flex;
   align-items: center;
-  gap: 11px;
+  gap: 4px;
   background: var(--bg-2);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 10px 12px;
+  padding: 10px 6px 10px 12px;
   color: var(--text);
   width: 100%;
-  cursor: pointer;
+  cursor: default;
   box-shadow: var(--shadow);
+}
+
+.list-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.list-del {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  color: var(--text-dim);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.list-del:active {
+  color: var(--danger);
 }
 
 .list-title {
@@ -1585,8 +1921,41 @@ svg.dim {
   }
 
   .rbtn {
-    width: 39px;
-    height: 39px;
+    width: 43px;
+    height: 46px;
+  }
+
+  .rbtn-label {
+    max-width: 42px;
+    font-size: 8px;
+  }
+
+  .rselect {
+    max-width: 108px;
+    font-size: 11.5px;
+  }
+
+  .rgroup {
+    padding: 3px 5px;
+  }
+
+  .theme-chip {
+    width: 36px;
+    height: 28px;
+  }
+
+  .slide-canvas.imgright .canvas-title,
+  .slide-canvas.imgright .title-rule,
+  .slide-canvas.imgright .canvas-bullets {
+    width: 100%;
+  }
+
+  .canvas-img {
+    position: static;
+    max-width: 88%;
+    max-height: 40%;
+    margin: 4px auto 0;
+    display: block;
   }
 
   .present-content h2 {

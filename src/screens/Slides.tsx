@@ -1,59 +1,76 @@
 import { useMemo, useRef, useState } from 'react';
-import { Icon, FileTypeIcon } from '../components/Icon';
+import { FileTypeIcon } from '../components/Icon';
+import { Palette, RBtn, RGroup, RWide } from '../components/Ribbon';
 import { chatStream, errMsg } from '../lib/ai-client';
-import { exportPptx, importPptx, openFilePicker, saveBinary, sanitizeName } from '../lib/fileio';
+import { exportPptx, importPptx, openFilePicker, pickImage, saveBinary, sanitizeName } from '../lib/fileio';
+import type { DeckSlide } from '../lib/fileio';
 import { debounce, getDoc, getSettings, putDoc, uid } from '../lib/storage';
 
-interface Slide {
-  title: string;
-  bullets: string[];
-}
+type RibbonTab = 'home' | 'insert' | 'design' | 'ai';
 
 interface DeckData {
-  slides: Slide[];
+  slides: DeckSlide[];
 }
+
+const THEMES = [
+  { name: 'Classic', bg: '#FFFFFF', accent: '#C43E1C' },
+  { name: 'Ivory', bg: '#FDF6EC', accent: '#B7791F' },
+  { name: 'Forest', bg: '#F0F7F0', accent: '#107C41' },
+  { name: 'Ocean', bg: '#EAF3FB', accent: '#185ABD' },
+  { name: 'Plum', bg: '#F6EEF9', accent: '#7030A0' },
+  { name: 'Ink', bg: '#1E2430', accent: '#7EB8DA' },
+];
+
+const LAYOUTS = [
+  { id: 'title', icon: 'layoutTitle', label: 'Title' },
+  { id: 'content', icon: 'layoutContent', label: 'Content' },
+  { id: 'section', icon: 'layoutSection', label: 'Section' },
+  { id: 'blank', icon: 'layoutBlank', label: 'Blank' },
+] as const;
 
 export default function Slides({ initialId, onExit }: { initialId?: string; onExit?: () => void }) {
   const deckId = useRef(initialId ?? uid()).current;
   const [title, setTitle] = useState(initialId ? 'Presentation' : 'Untitled deck');
-  const [slides, setSlides] = useState<Slide[]>(() => (initialId ? getDoc<DeckData>(initialId)?.slides ?? [] : []));
+  const [slides, setSlides] = useState<DeckSlide[]>(() => (initialId ? getDoc<DeckData>(initialId)?.slides ?? [] : []));
   const [sel, setSel] = useState(0);
   const [presenting, setPresenting] = useState(false);
   const [presIdx, setPresIdx] = useState(0);
+  const [rTab, setRTab] = useState<RibbonTab>('home');
+  const [bgPalette, setBgPalette] = useState(false);
+  const [menu, setMenu] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
   const [aiTopic, setAiTopic] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
-  const [menu, setMenu] = useState(false);
   const [toast, setToast] = useState('');
 
   const save = useMemo(
     () =>
-      debounce((sl: Slide[], t: string) => {
+      debounce((sl: DeckSlide[], t: string) => {
         putDoc<DeckData>('deck', deckId, t, { slides: sl });
       }, 700),
     [deckId],
   );
 
-  const update = (next: Slide[]) => {
+  const update = (next: DeckSlide[]) => {
     setSlides(next);
     save(next, title);
   };
 
-  const editSel = (patch: Partial<Slide>) => {
-    const next = slides.map((s, i) => (i === sel ? { ...s, ...patch } : s));
-    update(next);
+  const editSel = (patch: Partial<DeckSlide>) => {
+    update(slides.map((s, i) => (i === sel ? { ...s, ...patch } : s)));
   };
 
-  const addSlide = () => {
-    const next = [...slides, { title: 'New slide', bullets: [''] }];
+  const addSlide = (layout: DeckSlide['layout'] = 'content') => {
+    const next = [...slides, { title: layout === 'section' ? 'Section title' : 'New slide', bullets: layout === 'title' ? ['Subtitle'] : [''], layout }];
     update(next);
     setSel(next.length - 1);
   };
 
   const duplicateSlide = () => {
+    const cur = slides[sel];
     if (!cur) return;
     const next = [...slides];
-    next.splice(sel + 1, 0, { title: cur.title, bullets: [...cur.bullets] });
+    next.splice(sel + 1, 0, { ...cur, bullets: [...cur.bullets] });
     update(next);
     setSel(sel + 1);
   };
@@ -72,6 +89,22 @@ export default function Slides({ initialId, onExit }: { initialId?: string; onEx
     const next = slides.filter((_, i) => i !== idx);
     update(next);
     setSel(Math.max(0, Math.min(sel, next.length - 1)));
+  };
+
+  const insertImage = async () => {
+    try {
+      const data = await pickImage(1200);
+      if (data) editSel({ image: data });
+    } catch (e) {
+      flash(`Could not insert image: ${errMsg(e)}`);
+    }
+  };
+
+  const applyTheme = (t: (typeof THEMES)[number]) => editSel({ bg: t.bg, accent: t.accent });
+
+  const applyThemeAll = (t: (typeof THEMES)[number]) => {
+    update(slides.map((s) => ({ ...s, bg: t.bg, accent: t.accent })));
+    flash(`${t.name} theme applied to all slides.`);
   };
 
   const runAi = async () => {
@@ -93,19 +126,19 @@ export default function Slides({ initialId, onExit }: { initialId?: string; onEx
         },
         { role: 'user', content: topic },
       ]);
-      const parsed: Slide[] = [];
-      let curP: Slide | null = null;
+      const parsed: DeckSlide[] = [];
+      let curSlide: DeckSlide | null = null;
       for (const line of out.split('\n')) {
         const t = line.trim();
         const h = /^###\s+(.*)/.exec(t);
         if (h) {
-          if (curP) parsed.push(curP);
-          curP = { title: h[1], bullets: [] };
-        } else if (curP && /^[-*]\s+/.test(t)) {
-          curP.bullets.push(t.replace(/^[-*]\s+/, ''));
+          if (curSlide) parsed.push(curSlide);
+          curSlide = { title: h[1], bullets: [], layout: 'content' };
+        } else if (curSlide && /^[-*]\s+/.test(t)) {
+          curSlide.bullets.push(t.replace(/^[-*]\s+/, ''));
         }
       }
-      if (curP) parsed.push(curP);
+      if (curSlide) parsed.push(curSlide);
       if (parsed.length === 0) throw new Error('Could not parse the outline; try again.');
       update(parsed);
       setSel(0);
@@ -154,41 +187,63 @@ export default function Slides({ initialId, onExit }: { initialId?: string; onEx
     const s = slides[presIdx];
     const next = () => setPresIdx((i) => Math.min(i + 1, slides.length - 1));
     const prev = () => setPresIdx((i) => Math.max(i - 1, 0));
+    const dark = (s.bg ?? '#FFFFFF').toLowerCase().match(/^#([0-9a-f]{6})$/) ? isDark(s.bg!) : false;
+    const accent = s.accent ?? '#C43E1C';
     return (
       <div className="present">
         <div className="present-zones">
           <button className="present-zone" onClick={prev} aria-label="Previous slide" />
           <button className="present-zone wide" onClick={next} aria-label="Next slide" />
         </div>
-        <div className="present-content">
-          <h2>{s.title}</h2>
-          <ul>
-            {s.bullets.filter((b) => b.trim()).map((b, i) => (
-              <li key={i}>{b}</li>
-            ))}
-          </ul>
+        <div
+          className="present-content"
+          style={{ background: s.bg ?? '#FFFFFF', color: dark ? '#F2F2F2' : '#1B1B1B' }}
+        >
+          {(s.layout === 'section') && <div className="present-band" style={{ background: accent }} />}
+          <h2 style={s.layout === 'title' || s.layout === 'section' ? { textAlign: 'center', color: dark ? '#FFFFFF' : '#1B1B1B' } : undefined}>
+            {s.title}
+          </h2>
+          {s.layout !== 'section' && (
+            <ul>
+              {s.bullets.filter((b) => b.trim()).map((b, i) => (
+                <li key={i} style={s.layout === 'title' ? { listStyle: 'none', textAlign: 'center', color: accent, marginLeft: -20 } : undefined}>
+                  {b}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
         <div className="present-bar">
           <span>
             {presIdx + 1} / {slides.length}
           </span>
           <button className="icon-btn light" aria-label="Exit presentation" onClick={() => setPresenting(false)}>
-            <Icon name="close" size={20} />
+            ✕
           </button>
         </div>
       </div>
     );
   }
 
+  function isDark(hex: string): boolean {
+    const m = /^#([0-9a-fA-F]{6})$/.exec(hex);
+    if (!m) return false;
+    const v = parseInt(m[1], 16);
+    const r = (v >> 16) & 255;
+    const g = (v >> 8) & 255;
+    const b = v & 255;
+    return 0.299 * r + 0.587 * g + 0.114 * b < 140;
+  }
+
   const cur = slides[sel];
+  const curTheme = cur ? THEMES.find((t) => t.bg === cur.bg && t.accent === cur.accent) : undefined;
 
   return (
     <div className="edscreen" style={{ ['--app' as string]: 'var(--ppt)' }}>
       <header className="appbar">
         <button className="icon-btn light" aria-label="Back to Home" onClick={onExit}>
-          <Icon name="arrowLeft" size={21} />
+          <FileTypeIcon kind="deck" size={22} />
         </button>
-        <FileTypeIcon kind="deck" size={26} />
         <input
           className="appbar-title"
           value={title}
@@ -204,24 +259,24 @@ export default function Slides({ initialId, onExit }: { initialId?: string; onEx
           disabled={slides.length === 0}
           onClick={() => { setPresIdx(sel); setPresenting(true); }}
         >
-          <Icon name="play" size={19} />
+          ▶
         </button>
         <button className="icon-btn light" aria-label="Save as .pptx" disabled={slides.length === 0} onClick={() => void savePptx()}>
-          <Icon name="save" size={20} />
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" /><polyline points="17 21 17 13 7 13 7 21" /><polyline points="7 3 7 8 15 8" /></svg>
         </button>
         <div className="menu-wrap">
           <button className="icon-btn light" aria-label="More actions" onClick={() => setMenu(!menu)}>
-            <Icon name="more" size={20} />
+            ⋮
           </button>
           {menu && (
             <>
               <div className="menu-backdrop" onClick={() => setMenu(false)} />
               <div className="menu">
                 <button className="menu-item" onClick={() => void openFile()}>
-                  <Icon name="folder" size={18} /> Open .pptx
+                  Open .pptx
                 </button>
                 <button className="menu-item" onClick={() => { setMenu(false); setAiOpen(true); }}>
-                  <Icon name="sparkle" size={18} /> AI outline
+                  AI outline
                 </button>
               </div>
             </>
@@ -233,82 +288,224 @@ export default function Slides({ initialId, onExit }: { initialId?: string; onEx
         {slides.length === 0 ? (
           <div className="deck-empty">
             <FileTypeIcon kind="deck" size={54} />
-            <p>No slides yet. Add one below or generate an AI outline from the ⋮ menu.</p>
+            <p>No slides yet. Use Home → New slide, or generate an AI outline.</p>
           </div>
         ) : (
-          <>
-            {cur && (
-              <div className="slide-canvas">
-                <span className="slide-canvas-num">{sel + 1}</span>
-                <input
-                  className="canvas-title"
-                  value={cur.title}
-                  onChange={(e) => editSel({ title: e.target.value })}
-                  placeholder="Slide title"
-                />
-                <div className="canvas-bullets">
-                  {cur.bullets.map((b, i) => (
-                    <div key={i} className="canvas-bullet">
-                      <span className="dot">•</span>
-                      <input
-                        value={b}
-                        placeholder="Bullet"
-                        onChange={(e) => {
-                          const next = [...cur.bullets];
-                          next[i] = e.target.value;
-                          editSel({ bullets: next });
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            const next = [...cur.bullets, ''];
-                            editSel({ bullets: next });
-                          }
-                        }}
-                      />
-                      <button
-                        className="bullet-x"
-                        aria-label="Remove bullet"
-                        onClick={() => editSel({ bullets: cur.bullets.filter((_, j) => j !== i) })}
-                      >
-                        <Icon name="close" size={12} />
-                      </button>
-                    </div>
-                  ))}
-                  <button className="add-bullet" onClick={() => editSel({ bullets: [...cur.bullets, ''] })}>
-                    <Icon name="plus" size={13} /> Add bullet
-                  </button>
-                </div>
-              </div>
-            )}
+          cur && (
+            <div
+              className={`slide-canvas${cur.image ? ' imgright' : ''}`}
+              style={{ background: cur.bg ?? '#FFFFFF', borderColor: cur.accent ?? 'var(--ppt)' }}
+            >
+              <span className="slide-canvas-num" style={{ color: isDark(cur.bg ?? '#FFFFFF') ? 'rgba(255,255,255,0.7)' : '#9a9a9a' }}>
+                {sel + 1}
+              </span>
 
-            <div className="slide-ops">
-              <button className="icon-btn" aria-label="Move up" disabled={sel === 0} onClick={() => move(sel, -1)}>
-                <Icon name="chevronLeft" size={19} />
-              </button>
-              <button className="icon-btn" aria-label="Move down" disabled={sel === slides.length - 1} onClick={() => move(sel, 1)}>
-                <Icon name="chevronRight" size={19} />
-              </button>
-              <button className="icon-btn" aria-label="Duplicate slide" onClick={duplicateSlide}>
-                <Icon name="copy" size={18} />
-              </button>
-              <button className="icon-btn danger" aria-label="Delete slide" onClick={() => removeSlide(sel)}>
-                <Icon name="trash" size={18} />
-              </button>
-              <span className="slide-count">{slides.length} slides</span>
+              {cur.layout === 'section' && (
+                <div className="section-band" style={{ background: cur.accent ?? 'var(--ppt)' }}>
+                  <input
+                    className="canvas-title onband"
+                    value={cur.title}
+                    onChange={(e) => editSel({ title: e.target.value })}
+                    placeholder="Section title"
+                  />
+                </div>
+              )}
+
+              {cur.layout === 'title' && (
+                <div className="title-wrap">
+                  <input
+                    className="canvas-title xl"
+                    style={{ color: isDark(cur.bg ?? '#FFFFFF') ? '#FFFFFF' : '#1B1B1B' }}
+                    value={cur.title}
+                    onChange={(e) => editSel({ title: e.target.value })}
+                    placeholder="Presentation title"
+                  />
+                  <input
+                    className="canvas-sub"
+                    style={{ color: cur.accent ?? 'var(--ppt)' }}
+                    value={cur.bullets[0] ?? ''}
+                    onChange={(e) => {
+                      const b = [...cur.bullets];
+                      b[0] = e.target.value;
+                      editSel({ bullets: b });
+                    }}
+                    placeholder="Subtitle"
+                  />
+                </div>
+              )}
+
+              {(cur.layout === 'content' || !cur.layout) && (
+                <>
+                  <input
+                    className="canvas-title"
+                    style={{ color: isDark(cur.bg ?? '#FFFFFF') ? '#FFFFFF' : '#1B1B1B' }}
+                    value={cur.title}
+                    onChange={(e) => editSel({ title: e.target.value })}
+                    placeholder="Slide title"
+                  />
+                  <div
+                    className="title-rule"
+                    style={{ background: cur.accent ?? 'var(--ppt)' }}
+                  />
+                  <div className="canvas-bullets">
+                    {cur.bullets.map((b, i) => (
+                      <div key={i} className="canvas-bullet">
+                        <span className="dot" style={{ color: cur.accent ?? 'var(--ppt)' }}>•</span>
+                        <input
+                          value={b}
+                          placeholder="Bullet"
+                          style={{ color: isDark(cur.bg ?? '#FFFFFF') ? '#E8E8E8' : '#2B2B2B' }}
+                          onChange={(e) => {
+                            const next = [...cur.bullets];
+                            next[i] = e.target.value;
+                            editSel({ bullets: next });
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              const next = [...cur.bullets, ''];
+                              editSel({ bullets: next });
+                            }
+                          }}
+                        />
+                        <button
+                          className="bullet-x"
+                          aria-label="Remove bullet"
+                          onClick={() => editSel({ bullets: cur.bullets.filter((_, j) => j !== i) })}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                    <button className="add-bullet" onClick={() => editSel({ bullets: [...cur.bullets, ''] })}>
+                      + Add bullet
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {cur.image && <img className="canvas-img" src={cur.image} alt="" />}
+
+              {cur.layout === 'blank' && !cur.image && (
+                <p className="blank-hint" style={{ color: isDark(cur.bg ?? '#FFFFFF') ? 'rgba(255,255,255,0.5)' : '#B0B0B0' }}>
+                  Blank slide — add an image from the Insert tab.
+                </p>
+              )}
             </div>
-          </>
+          )
+        )}
+      </div>
+
+      <div className="ribbon">
+        <div className="ribbon-tabs">
+          {(['home', 'insert', 'design', 'ai'] as RibbonTab[]).map((t) => (
+            <button key={t} className={`ribbon-tab${rTab === t ? ' active' : ''}`} onClick={() => { setRTab(t); setBgPalette(false); }}>
+              {t === 'home' ? 'Home' : t === 'insert' ? 'Insert' : t === 'design' ? 'Design' : 'AI'}
+            </button>
+          ))}
+        </div>
+
+        {bgPalette && (
+          <Palette
+            onPick={(c) => {
+              editSel({ bg: c });
+              setBgPalette(false);
+            }}
+          />
+        )}
+
+        {rTab === 'home' && (
+          <div className="ribbon-row">
+            <RGroup label="Slides">
+              <RBtn icon="plus" label="New" onRun={() => addSlide('content')} />
+              <RBtn icon="copy" label="Duplicate" disabled={!cur} onRun={duplicateSlide} />
+              <RBtn icon="trash" label="Delete" disabled={!cur || slides.length === 0} onRun={() => removeSlide(sel)} />
+            </RGroup>
+            <RGroup label="Reorder">
+              <RBtn icon="chevronLeft" label="Earlier" disabled={!cur || sel === 0} onRun={() => move(sel, -1)} />
+              <RBtn icon="chevronRight" label="Later" disabled={!cur || sel === slides.length - 1} onRun={() => move(sel, 1)} />
+            </RGroup>
+            <RGroup label="Layouts">
+              {LAYOUTS.map((l) => (
+                <RBtn
+                  key={l.id}
+                  icon={l.icon}
+                  label={l.label}
+                  active={cur?.layout === l.id || (l.id === 'content' && !cur?.layout)}
+                  disabled={!cur}
+                  onRun={() => editSel({ layout: l.id })}
+                />
+              ))}
+            </RGroup>
+          </div>
+        )}
+
+        {rTab === 'insert' && (
+          <div className="ribbon-row">
+            <RGroup label="Media">
+              <RBtn icon="image" label="Picture" disabled={!cur} onRun={() => void insertImage()} />
+              <RBtn icon="close" label="Remove" disabled={!cur?.image} onRun={() => editSel({ image: undefined })} />
+            </RGroup>
+            <RGroup label="Bullets">
+              <RBtn icon="plus" label="Add bullet" disabled={!cur || cur.layout !== 'content'} onRun={() => editSel({ bullets: [...(cur?.bullets ?? []), ''] })} />
+            </RGroup>
+          </div>
+        )}
+
+        {rTab === 'design' && (
+          <div className="ribbon-row">
+            <RGroup label="Themes (this slide)">
+              <div className="theme-chips">
+                {THEMES.map((t) => (
+                  <button
+                    key={t.name}
+                    className={`theme-chip${curTheme?.name === t.name ? ' active' : ''}`}
+                    title={`${t.name} theme`}
+                    aria-label={`${t.name} theme`}
+                    onClick={() => applyTheme(t)}
+                  >
+                    <span className="chip-bg" style={{ background: t.bg }}>
+                      <span className="chip-accent" style={{ background: t.accent }} />
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </RGroup>
+            <RGroup label="Apply">
+              <RWide icon="theme" label={curTheme ? `All slides: ${curTheme.name}` : 'Apply to all slides'} disabled={!cur} onRun={() => curTheme && applyThemeAll(curTheme)} />
+            </RGroup>
+            <RGroup label="Background">
+              <RBtn icon="fill" label="Pick color" disabled={!cur} onRun={() => setBgPalette(!bgPalette)} />
+            </RGroup>
+          </div>
+        )}
+
+        {rTab === 'ai' && (
+          <div className="ribbon-row">
+            <RGroup label="AI deck builder">
+              <RWide icon="sparkle" label="Generate an outline" disabled={aiBusy} onRun={() => setAiOpen(true)} />
+            </RGroup>
+          </div>
         )}
       </div>
 
       <div className="filmstrip">
         {slides.map((s, i) => (
-          <button key={i} className={`slide-thumb${i === sel ? ' selected' : ''}`} onClick={() => setSel(i)}>
-            <span className="slide-num">{i + 1}</span>
-            <span className="slide-thumb-title">{s.title || 'Untitled'}</span>
+          <button
+            key={i}
+            className={`slide-thumb${i === sel ? ' selected' : ''}`}
+            style={{ background: s.bg ?? '#FFFFFF' }}
+            onClick={() => setSel(i)}
+          >
+            <span className="slide-num" style={{ color: isDark(s.bg ?? '#FFFFFF') ? 'rgba(255,255,255,0.65)' : '#9a9a9a' }}>
+              {i + 1}
+            </span>
+            <span className="slide-thumb-title" style={{ color: isDark(s.bg ?? '#FFFFFF') ? '#F0F0F0' : 'inherit' }}>
+              {s.title || 'Untitled'}
+            </span>
           </button>
         ))}
-        <button className="slide-thumb add" aria-label="Add slide" onClick={addSlide}>
-          <Icon name="plus" size={22} />
+        <button className="slide-thumb add" aria-label="Add slide" onClick={() => addSlide('content')}>
+          +
         </button>
       </div>
 

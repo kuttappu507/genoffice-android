@@ -1,20 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Icon, FileTypeIcon } from '../components/Icon';
+import { FileTypeIcon } from '../components/Icon';
+import { Palette, RBtn, RGroup, RSelect, RWide } from '../components/Ribbon';
 import { chatStream, errMsg } from '../lib/ai-client';
 import { debounce, getDoc, getSettings, putDoc, downloadText, uid } from '../lib/storage';
-import { exportDocx, importDocx, openFilePicker, saveBinary, sanitizeName, textToHtml } from '../lib/fileio';
+import { exportDocx, importDocx, openFilePicker, pickImage, saveBinary, sanitizeName, textToHtml } from '../lib/fileio';
 
 interface DocData {
   html: string;
 }
 
 type AiMode = 'continue' | 'summarize' | 'rewrite';
-type RibbonTab = 'home' | 'insert' | 'ai';
+type RibbonTab = 'home' | 'insert' | 'review';
 
 const AI_PROMPTS: Record<AiMode, { sys: string; label: string; icon: string }> = {
   continue: {
     sys: 'You are a writing assistant. Continue the user\'s text naturally in the same voice and language. Output ONLY the continuation, no heading, no commentary.',
-    label: 'Continue',
+    label: 'Continue writing',
     icon: 'sparkle',
   },
   summarize: {
@@ -29,56 +30,43 @@ const AI_PROMPTS: Record<AiMode, { sys: string; label: string; icon: string }> =
   },
 };
 
-/** Office-standard palette. */
-const PALETTE = [
-  '#000000', '#404040', '#8B0000', '#C00000', '#FFC000', '#FFFF00',
-  '#92D050', '#00B050', '#00B0F0', '#0070C0', '#1F4E79', '#7030A0',
+const FONTS = ['Calibri', 'Segoe UI', 'Arial', 'Times New Roman', 'Georgia', 'Verdana', 'Courier New'].map((f) => ({ v: f, t: f }));
+const SIZES = ['8', '9', '10', '11', '12', '14', '16', '18', '20', '24', '28', '32', '36', '48'].map((s) => ({ v: s, t: s }));
+const STYLES = [
+  { v: 'p', t: 'Normal text' },
+  { v: 'h1', t: 'Heading 1' },
+  { v: 'h2', t: 'Heading 2' },
+  { v: 'h3', t: 'Heading 3' },
+  { v: 'blockquote', t: 'Quote' },
 ];
 
-interface RBtn {
-  icon: string;
-  label?: string;
-  cmd?: string;
-  arg?: string;
-  state?: string;
-}
-
-const HOME_RIBBON: (RBtn | 'div')[] = [
-  { icon: 'undo', cmd: 'undo', label: 'Undo' },
-  { icon: 'redo', cmd: 'redo', label: 'Redo' },
-  'div',
-  { icon: 'bold', cmd: 'bold', state: 'bold', label: 'Bold' },
-  { icon: 'italic', cmd: 'italic', state: 'italic', label: 'Italic' },
-  { icon: 'underline', cmd: 'underline', state: 'underline', label: 'Underline' },
-  { icon: 'strike', cmd: 'strikeThrough', state: 'strikeThrough', label: 'Strikethrough' },
-  'div',
-  { icon: 'h1', cmd: 'formatBlock', arg: '<h1>', label: 'Heading 1' },
-  { icon: 'h2', cmd: 'formatBlock', arg: '<h2>', label: 'Heading 2' },
-  'div',
-  { icon: 'listBullet', cmd: 'insertUnorderedList', state: 'insertUnorderedList', label: 'Bullets' },
-  { icon: 'listOrdered', cmd: 'insertOrderedList', state: 'insertOrderedList', label: 'Numbering' },
-  { icon: 'outdent', cmd: 'outdent', label: 'Decrease indent' },
-  { icon: 'indent', cmd: 'indent', label: 'Increase indent' },
-  'div',
-  { icon: 'alignLeft', cmd: 'justifyLeft', state: 'justifyLeft', label: 'Align left' },
-  { icon: 'alignCenter', cmd: 'justifyCenter', state: 'justifyCenter', label: 'Center' },
-  { icon: 'alignRight', cmd: 'justifyRight', state: 'justifyRight', label: 'Align right' },
-  { icon: 'alignJustify', cmd: 'justifyFull', state: 'justifyFull', label: 'Justify' },
-  'div',
-  { icon: 'clearFormat', cmd: 'removeFormat', label: 'Clear formatting' },
-];
+const DEFAULT_HILITE = '#FFFF00';
+const DEFAULT_TEXT = '#C00000';
 
 export default function Docs({ initialId, onExit }: { initialId?: string; onExit?: () => void }) {
   const docId = useRef(initialId ?? uid()).current;
   const [title, setTitle] = useState(initialId ? 'Document' : 'Untitled document');
   const [words, setWords] = useState(0);
+  const [chars, setChars] = useState(0);
   const [aiOut, setAiOut] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
   const [toast, setToast] = useState('');
   const [rTab, setRTab] = useState<RibbonTab>('home');
   const [palette, setPalette] = useState<'text' | 'hilite' | null>(null);
   const [menu, setMenu] = useState(false);
+  const [fontFam, setFontFam] = useState('Calibri');
+  const [fontSize, setFontSize] = useState('11');
+  const [block, setBlock] = useState('p');
   const [fmt, setFmt] = useState<Record<string, boolean>>({});
+  const [selBar, setSelBar] = useState<{ top: number; left: number } | null>(null);
+
+  // find & replace
+  const [findOpen, setFindOpen] = useState(false);
+  const [fq, setFq] = useState('');
+  const [fr, setFr] = useState('');
+  const [hitCount, setHitCount] = useState(0);
+  const [curHit, setCurHit] = useState(0);
+
   const editorRef = useRef<HTMLDivElement>(null);
   const loaded = useRef(false);
 
@@ -90,32 +78,55 @@ export default function Docs({ initialId, onExit }: { initialId?: string; onExit
       const d = getDoc<DocData>(initialId);
       if (d && editorRef.current) {
         editorRef.current.innerHTML = d.html;
-        setWords(d.html ? (editorRef.current.innerText ?? '').trim().split(/\s+/).length : 0);
+        recount();
       }
     }
   }, [initialId]);
 
-  // live ribbon states, like Word's active format highlight
+  const recount = () => {
+    const t = editorRef.current?.innerText ?? '';
+    setWords(t.trim() ? t.trim().split(/\s+/).length : 0);
+    setChars(t.replace(/\n/g, '').length);
+  };
+
+  // live ribbon states + floating selection toolbar, like Word mobile
   useEffect(() => {
     const h = () => {
+      const ed = editorRef.current;
+      const sel = window.getSelection();
       try {
-        const active = document.activeElement === editorRef.current;
-        if (!active) return;
-        setFmt({
-          bold: document.queryCommandState('bold'),
-          italic: document.queryCommandState('italic'),
-          underline: document.queryCommandState('underline'),
-          strikeThrough: document.queryCommandState('strikeThrough'),
-          insertUnorderedList: document.queryCommandState('insertUnorderedList'),
-          insertOrderedList: document.queryCommandState('insertOrderedList'),
-          justifyLeft: document.queryCommandState('justifyLeft'),
-          justifyCenter: document.queryCommandState('justifyCenter'),
-          justifyRight: document.queryCommandState('justifyRight'),
-          justifyFull: document.queryCommandState('justifyFull'),
-        });
+        const active = document.activeElement === ed;
+        if (active) {
+          setFmt({
+            bold: document.queryCommandState('bold'),
+            italic: document.queryCommandState('italic'),
+            underline: document.queryCommandState('underline'),
+            strikeThrough: document.queryCommandState('strikeThrough'),
+            insertUnorderedList: document.queryCommandState('insertUnorderedList'),
+            insertOrderedList: document.queryCommandState('insertOrderedList'),
+            justifyLeft: document.queryCommandState('justifyLeft'),
+            justifyCenter: document.queryCommandState('justifyCenter'),
+            justifyRight: document.queryCommandState('justifyRight'),
+            justifyFull: document.queryCommandState('justifyFull'),
+          });
+          const b = (document.queryCommandValue('formatBlock') ?? '').toLowerCase().replace(/[<>]/g, '');
+          if (b) setBlock(STYLES.some((s) => s.v === b) ? b : 'p');
+        }
       } catch {
         /* noop */
       }
+      // floating Aa toolbar while text is selected
+      if (sel && !sel.isCollapsed && ed && (ed.contains(sel.anchorNode) || ed.contains(sel.focusNode))) {
+        const r = sel.getRangeAt(0).getBoundingClientRect();
+        if (r.width > 0 || r.height > 0) {
+          setSelBar({
+            top: Math.max(8, r.top - 50),
+            left: Math.min(window.innerWidth - 90, Math.max(90, r.left + r.width / 2)),
+          });
+          return;
+        }
+      }
+      setSelBar(null);
     };
     document.addEventListener('selectionchange', h);
     return () => document.removeEventListener('selectionchange', h);
@@ -129,17 +140,180 @@ export default function Docs({ initialId, onExit }: { initialId?: string; onExit
     [docId, title],
   );
 
-  const recount = () => {
-    const t = editorRef.current?.innerText ?? '';
-    setWords(t.trim() ? t.trim().split(/\s+/).length : 0);
-  };
-
   const exec = (cmd: string, value?: string) => {
     document.execCommand(cmd, false, value);
     editorRef.current?.focus();
+    recount();
     save();
   };
 
+  /** Word-style font size: wraps the selection in a span with an exact px size. */
+  const applyFontSize = (px: string) => {
+    setFontSize(px);
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+    editorRef.current?.focus();
+    if (sel.isCollapsed) {
+      document.execCommand('insertHTML', false, `<span style="font-size:${px}px">\u200b</span>`);
+    } else {
+      const range = sel.getRangeAt(0);
+      const span = document.createElement('span');
+      span.style.fontSize = `${px}px`;
+      try {
+        span.appendChild(range.extractContents());
+        range.insertNode(span);
+        sel.removeAllRanges();
+        const r2 = document.createRange();
+        r2.selectNodeContents(span);
+        sel.addRange(r2);
+      } catch {
+        document.execCommand('fontSize', false, '4');
+      }
+    }
+    save();
+  };
+
+  const applyFont = (f: string) => {
+    setFontFam(f);
+    exec('fontName', f);
+  };
+
+  // ------------------------------------------------------------------ find & replace
+  const clearHits = () => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    ed.querySelectorAll('mark.find-hit').forEach((m) => {
+      const p = m.parentNode;
+      if (p) {
+        p.replaceChild(document.createTextNode(m.textContent ?? ''), m);
+        p.normalize();
+      }
+    });
+  };
+
+  const runFind = () => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    clearHits();
+    setCurHit(0);
+    if (!fq.trim()) {
+      setHitCount(0);
+      return;
+    }
+    const q = fq.toLowerCase();
+    const walker = document.createTreeWalker(ed, NodeFilter.SHOW_TEXT);
+    const targets: Text[] = [];
+    let n: Node | null;
+    while ((n = walker.nextNode())) {
+      const t = n as Text;
+      const inMark = t.parentElement?.closest('mark.find-hit');
+      if (!inMark && t.textContent && t.textContent.toLowerCase().includes(q)) targets.push(t);
+    }
+    let count = 0;
+    for (const t of targets) {
+      const text = t.textContent ?? '';
+      const lower = text.toLowerCase();
+      const frag = document.createDocumentFragment();
+      let i = 0;
+      for (;;) {
+        const idx = lower.indexOf(q, i);
+        if (idx < 0) {
+          if (i < text.length) frag.appendChild(document.createTextNode(text.slice(i)));
+          break;
+        }
+        if (idx > i) frag.appendChild(document.createTextNode(text.slice(i, idx)));
+        const mk = document.createElement('mark');
+        mk.className = 'find-hit';
+        mk.textContent = text.slice(idx, idx + fq.length);
+        frag.appendChild(mk);
+        count++;
+        i = idx + q.length;
+      }
+      t.replaceWith(frag);
+    }
+    setHitCount(count);
+    if (count > 0) {
+      setCurHit(1);
+      ed.querySelector('mark.find-hit')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  };
+
+  const gotoHit = (dir: 1 | -1) => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    const ms = Array.from(ed.querySelectorAll('mark.find-hit'));
+    if (ms.length === 0) return;
+    const idx = (curHit - 1 + dir + ms.length) % ms.length;
+    ms.forEach((m) => m.classList.remove('cur'));
+    ms[idx].classList.add('cur');
+    ms[idx].scrollIntoView({ block: 'center', behavior: 'smooth' });
+    setCurHit(idx + 1);
+  };
+
+  const replaceOne = () => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    const ms = Array.from(ed.querySelectorAll('mark.find-hit'));
+    if (ms.length === 0) return;
+    const target = ed.querySelector('mark.find-hit.cur') ?? ms[0];
+    target.replaceWith(document.createTextNode(fr));
+    ed.normalize();
+    runFind();
+    save();
+  };
+
+  const replaceAll = () => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    const ms = Array.from(ed.querySelectorAll('mark.find-hit'));
+    if (ms.length === 0) return;
+    ms.forEach((m) => m.replaceWith(document.createTextNode(fr)));
+    ed.normalize();
+    clearHits();
+    setHitCount(0);
+    setCurHit(0);
+    recount();
+    save();
+    flash(`Replaced ${ms.length} occurrence(s).`);
+  };
+
+  const closeFind = () => {
+    clearHits();
+    setFindOpen(false);
+    setHitCount(0);
+    setCurHit(0);
+  };
+
+  // ------------------------------------------------------------------ inserts
+  const insertAtCaret = (text: string) => {
+    editorRef.current?.focus();
+    document.execCommand('insertText', false, text);
+    recount();
+    save();
+  };
+
+  const insertHtml = (html: string) => {
+    editorRef.current?.focus();
+    document.execCommand('insertHTML', false, html);
+    recount();
+    save();
+  };
+
+  const insertImage = async () => {
+    try {
+      const data = await pickImage(1400);
+      if (data) insertHtml(`<img src="${data}" alt=""><p><br></p>`);
+    } catch (e) {
+      flash(`Could not insert image: ${errMsg(e)}`);
+    }
+  };
+
+  const insertTable = (rows: number, cols: number) => {
+    const trs = Array.from({ length: rows }, () => `<tr>${'<td>&nbsp;</td>'.repeat(cols)}</tr>`).join('');
+    insertHtml(`<table>${trs}</table><p><br></p>`);
+  };
+
+  // ------------------------------------------------------------------ AI
   const insertAtEnd = (text: string) => {
     const el = editorRef.current;
     if (!el) return;
@@ -151,13 +325,6 @@ export default function Docs({ initialId, onExit }: { initialId?: string; onExit
     sel?.removeAllRanges();
     sel?.addRange(range);
     document.execCommand('insertHTML', false, `<p><br></p><p>${text.replace(/\n/g, '<br>')}</p>`);
-    recount();
-    save();
-  };
-
-  const insertAtCaret = (text: string) => {
-    editorRef.current?.focus();
-    document.execCommand('insertText', false, text);
     recount();
     save();
   };
@@ -194,6 +361,7 @@ export default function Docs({ initialId, onExit }: { initialId?: string; onExit
     }
   };
 
+  // ------------------------------------------------------------------ files
   const openFile = async () => {
     setMenu(false);
     const pick = await openFilePicker('.docx,.txt,.md,.html,.htm');
@@ -235,26 +403,12 @@ export default function Docs({ initialId, onExit }: { initialId?: string; onExit
     setTimeout(() => setToast(''), 3000);
   };
 
-  const homeBtn = (b: RBtn, i: number) => (
-    <button
-      key={`${b.cmd}-${i}`}
-      className={`rbtn${b.state && fmt[b.state] ? ' active' : ''}`}
-      title={b.label}
-      aria-label={b.label}
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={() => b.cmd && exec(b.cmd, b.arg)}
-    >
-      <Icon name={b.icon} size={19} />
-    </button>
-  );
-
   return (
     <div className="edscreen" style={{ ['--app' as string]: 'var(--word)' }}>
       <header className="appbar">
         <button className="icon-btn light" aria-label="Back to Home" onClick={onExit}>
-          <Icon name="arrowLeft" size={21} />
+          <FileTypeIcon kind="doc" size={22} />
         </button>
-        <FileTypeIcon kind="doc" size={26} />
         <input
           className="appbar-title"
           value={title}
@@ -265,27 +419,43 @@ export default function Docs({ initialId, onExit }: { initialId?: string; onExit
           placeholder="Document title"
         />
         <button className="icon-btn light" aria-label="Save as .docx" onClick={() => void saveDocx()}>
-          <Icon name="save" size={20} />
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" /><polyline points="17 21 17 13 7 13 7 21" /><polyline points="7 3 7 8 15 8" /></svg>
         </button>
         <div className="menu-wrap">
           <button className="icon-btn light" aria-label="More actions" onClick={() => setMenu(!menu)}>
-            <Icon name="more" size={20} />
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="5" r="1.7" fill="currentColor" /><circle cx="12" cy="12" r="1.7" fill="currentColor" /><circle cx="12" cy="19" r="1.7" fill="currentColor" /></svg>
           </button>
           {menu && (
             <>
               <div className="menu-backdrop" onClick={() => setMenu(false)} />
               <div className="menu">
                 <button className="menu-item" onClick={() => void openFile()}>
-                  <Icon name="folder" size={18} /> Open file
+                  Open file (.docx / .txt)
                 </button>
                 <button className="menu-item" onClick={saveHtml}>
-                  <Icon name="download" size={18} /> Save as HTML
+                  Save as HTML
                 </button>
               </div>
             </>
           )}
         </div>
       </header>
+
+      {findOpen && (
+        <div className="findbar">
+          <input className="input find-input" value={fq} placeholder="Find" onChange={(e) => setFq(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && runFind()} />
+          <input className="input find-input" value={fr} placeholder="Replace with" onChange={(e) => setFr(e.target.value)} />
+          <div className="find-ops">
+            <button className="btn small" onClick={runFind}>Find all</button>
+            <button className="btn small" disabled={!hitCount} onClick={() => gotoHit(-1)} aria-label="Previous match">↑</button>
+            <button className="btn small" disabled={!hitCount} onClick={() => gotoHit(1)} aria-label="Next match">↓</button>
+            <button className="btn small" disabled={!hitCount} onClick={replaceOne}>Replace</button>
+            <button className="btn small" disabled={!hitCount} onClick={replaceAll}>All</button>
+            <span className="find-count">{hitCount ? `${curHit}/${hitCount}` : ''}</span>
+            <button className="btn small" onClick={closeFind} aria-label="Close find and replace">✕</button>
+          </div>
+        </div>
+      )}
 
       <div className="edbody">
         <div className="paper-wrap">
@@ -301,18 +471,29 @@ export default function Docs({ initialId, onExit }: { initialId?: string; onExit
             data-placeholder="Start writing…"
           />
           <div className="ed-status">
-            <span>{words} words</span>
+            <span>{words} words · {chars} characters</span>
             <span>Saved on device</span>
           </div>
         </div>
       </div>
 
+      {/* floating selection toolbar (Word mobile "Aa" bar) */}
+      {selBar && (
+        <div className="selbar" style={{ top: selBar.top, left: selBar.left }}>
+          <button className="icon-btn" aria-label="Bold" onMouseDown={(e) => e.preventDefault()} onClick={() => exec('bold')}><b>B</b></button>
+          <button className="icon-btn" aria-label="Italic" onMouseDown={(e) => e.preventDefault()} onClick={() => exec('italic')}><i>I</i></button>
+          <button className="icon-btn" aria-label="Underline" onMouseDown={(e) => e.preventDefault()} onClick={() => exec('underline')}><u>U</u></button>
+          <button className="icon-btn" aria-label="Strikethrough" onMouseDown={(e) => e.preventDefault()} onClick={() => exec('strikeThrough')}><s>S</s></button>
+          <button className="icon-btn aa" aria-label="Show all formatting tools" onMouseDown={(e) => e.preventDefault()} onClick={() => { setRTab('home'); setSelBar(null); }}>Aa</button>
+        </div>
+      )}
+
       {(aiBusy || aiOut) && (
         <div className="ai-sheet">
           <div className="ai-sheet-head">
-            <Icon name="sparkle" size={16} /> AI result
+            AI result
             <button className="icon-btn" aria-label="Dismiss" onClick={() => { setAiOut(''); setAiBusy(false); }}>
-              <Icon name="close" size={17} />
+              ✕
             </button>
           </div>
           <div className="ai-sheet-body">{aiBusy ? 'Generating…' : aiOut}</div>
@@ -329,95 +510,109 @@ export default function Docs({ initialId, onExit }: { initialId?: string; onExit
 
       <div className="ribbon">
         <div className="ribbon-tabs">
-          {(['home', 'insert', 'ai'] as RibbonTab[]).map((t) => (
+          {(['home', 'insert', 'review'] as RibbonTab[]).map((t) => (
             <button key={t} className={`ribbon-tab${rTab === t ? ' active' : ''}`} onClick={() => { setRTab(t); setPalette(null); }}>
-              {t === 'ai' ? 'AI' : t === 'home' ? 'Home' : 'Insert'}
+              {t === 'home' ? 'Home' : t === 'insert' ? 'Insert' : 'Review'}
             </button>
           ))}
         </div>
 
         {palette && (
-          <div className="palette-row">
-            {PALETTE.map((c) => (
-              <button
-                key={c}
-                className="swatch"
-                style={{ background: c }}
-                aria-label={`Color ${c}`}
-                onClick={() => {
-                  exec(palette === 'text' ? 'foreColor' : 'hiliteColor', c);
-                  setPalette(null);
-                }}
-              />
-            ))}
-          </div>
+          <Palette
+            onPick={(c) => {
+              exec(palette === 'text' ? 'foreColor' : 'hiliteColor', c);
+              setPalette(null);
+            }}
+            auto={() => {
+              exec(palette === 'text' ? 'foreColor' : 'hiliteColor', palette === 'text' ? '#1b1b1b' : 'transparent');
+              setPalette(null);
+            }}
+          />
         )}
 
         {rTab === 'home' && (
           <div className="ribbon-row">
-            {HOME_RIBBON.map((b, i) =>
-              b === 'div' ? <span key={`d${i}`} className="rdiv" /> : homeBtn(b, i),
-            )}
-            <span className="rdiv" />
-            <button className="rbtn" title="Font color" aria-label="Font color" onClick={() => setPalette(palette === 'text' ? null : 'text')}>
-              <Icon name="fontColor" size={19} />
-            </button>
-            <button className="rbtn" title="Highlight" aria-label="Highlight" onClick={() => setPalette(palette === 'hilite' ? null : 'hilite')}>
-              <Icon name="highlight" size={19} />
-            </button>
+            <RGroup label="Undo">
+              <RBtn icon="undo" label="Undo" keepFocus onRun={() => exec('undo')} />
+              <RBtn icon="redo" label="Redo" keepFocus onRun={() => exec('redo')} />
+            </RGroup>
+            <RGroup label="Font">
+              <RSelect value={fontFam} options={FONTS} onChange={applyFont} width={104} title="Font" />
+              <RSelect value={fontSize} options={SIZES} onChange={applyFontSize} width={58} title="Font size" />
+              <RBtn icon="bold" label="Bold" active={fmt.bold} keepFocus onRun={() => exec('bold')} />
+              <RBtn icon="italic" label="Italic" active={fmt.italic} keepFocus onRun={() => exec('italic')} />
+              <RBtn icon="underline" label="Underline" active={fmt.underline} keepFocus onRun={() => exec('underline')} />
+              <RBtn icon="strike" label="Strike" active={fmt.strikeThrough} keepFocus onRun={() => exec('strikeThrough')} />
+              <RBtn icon="fontColor" label="Color" colorBar={DEFAULT_TEXT} keepFocus onRun={() => setPalette(palette === 'text' ? null : 'text')} />
+              <RBtn icon="highlight" label="Highlight" colorBar={DEFAULT_HILITE} keepFocus onRun={() => setPalette(palette === 'hilite' ? null : 'hilite')} />
+              <RBtn icon="clearFormat" label="Clear" keepFocus onRun={() => exec('removeFormat')} />
+            </RGroup>
+            <RGroup label="Paragraph">
+              <RBtn icon="listBullet" label="Bullets" active={fmt.insertUnorderedList} keepFocus onRun={() => exec('insertUnorderedList')} />
+              <RBtn icon="listOrdered" label="Numbering" active={fmt.insertOrderedList} keepFocus onRun={() => exec('insertOrderedList')} />
+              <RBtn icon="outdent" label="Less indent" keepFocus onRun={() => exec('outdent')} />
+              <RBtn icon="indent" label="More indent" keepFocus onRun={() => exec('indent')} />
+              <RBtn icon="alignLeft" label="Left" active={fmt.justifyLeft} keepFocus onRun={() => exec('justifyLeft')} />
+              <RBtn icon="alignCenter" label="Center" active={fmt.justifyCenter} keepFocus onRun={() => exec('justifyCenter')} />
+              <RBtn icon="alignRight" label="Right" active={fmt.justifyRight} keepFocus onRun={() => exec('justifyRight')} />
+              <RBtn icon="alignJustify" label="Justify" active={fmt.justifyFull} keepFocus onRun={() => exec('justifyFull')} />
+            </RGroup>
+            <RGroup label="Styles">
+              <RSelect
+                value={block}
+                options={STYLES}
+                onChange={(v) => {
+                  setBlock(v);
+                  exec('formatBlock', `<${v}>`);
+                }}
+                width={118}
+                title="Paragraph style"
+              />
+            </RGroup>
+            <RGroup label="Editing">
+              <RBtn icon="search" label="Find" active={findOpen} onRun={() => setFindOpen(!findOpen)} />
+            </RGroup>
           </div>
         )}
 
         {rTab === 'insert' && (
           <div className="ribbon-row">
-            <button
-              className="rbtn"
-              title="Insert table"
-              aria-label="Insert table"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() =>
-                exec(
-                  'insertHTML',
-                  '<table><tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr><tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr><tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr></table><p><br></p>',
-                )
-              }
-            >
-              <Icon name="table" size={19} />
-            </button>
-            <button className="rbtn" title="Divider line" aria-label="Insert divider" onMouseDown={(e) => e.preventDefault()} onClick={() => exec('insertHTML', '<hr><p><br></p>')}>
-              <Icon name="hr" size={19} />
-            </button>
-            <button
-              className="rbtn"
-              title="Insert link"
-              aria-label="Insert link"
-              onClick={() => {
-                const url = window.prompt('Link URL', 'https://');
-                if (url) exec('createLink', url);
-              }}
-            >
-              <Icon name="link" size={19} />
-            </button>
-            <button
-              className="rbtn"
-              title="Insert date"
-              aria-label="Insert date"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => insertAtCaret(new Date().toLocaleDateString())}
-            >
-              <Icon name="calendar" size={19} />
-            </button>
+            <RGroup label="Media">
+              <RBtn icon="image" label="Picture" keepFocus onRun={() => void insertImage()} />
+            </RGroup>
+            <RGroup label="Tables">
+              <RBtn icon="table" label="2 × 3" keepFocus onRun={() => insertTable(2, 3)} />
+              <RBtn icon="table" label="3 × 3" keepFocus onRun={() => insertTable(3, 3)} />
+              <RBtn icon="table" label="4 × 4" keepFocus onRun={() => insertTable(4, 4)} />
+            </RGroup>
+            <RGroup label="Links">
+              <RBtn
+                icon="link"
+                label="Link"
+                keepFocus
+                onRun={() => {
+                  const url = window.prompt('Link URL', 'https://');
+                  if (url) exec('createLink', url);
+                }}
+              />
+              <RBtn icon="hr" label="Divider" keepFocus onRun={() => insertHtml('<hr><p><br></p>')} />
+            </RGroup>
+            <RGroup label="Date">
+              <RBtn icon="calendar" label="Today" keepFocus onRun={() => insertAtCaret(new Date().toLocaleDateString())} />
+            </RGroup>
           </div>
         )}
 
-        {rTab === 'ai' && (
+        {rTab === 'review' && (
           <div className="ribbon-row">
-            {(Object.keys(AI_PROMPTS) as AiMode[]).map((m) => (
-              <button key={m} className="rbtn wide" disabled={aiBusy} onClick={() => void runAi(m)}>
-                <Icon name={AI_PROMPTS[m].icon} size={19} />
-                <span>{AI_PROMPTS[m].label}</span>
-              </button>
-            ))}
+            <RGroup label="AI writing">
+              {(Object.keys(AI_PROMPTS) as AiMode[]).map((m) => (
+                <RWide key={m} icon={AI_PROMPTS[m].icon} label={AI_PROMPTS[m].label} disabled={aiBusy} onRun={() => void runAi(m)} />
+              ))}
+            </RGroup>
+            <RGroup label="Proofing">
+              <RBtn icon="search" label="Find & Replace" active={findOpen} onRun={() => setFindOpen(!findOpen)} />
+            </RGroup>
           </div>
         )}
       </div>
