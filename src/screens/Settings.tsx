@@ -1,9 +1,15 @@
-import { useState } from 'react';
-import type { Provider } from '../types';
+import { useMemo, useState } from 'react';
+import type { AppPrefs, Provider, ThemeMode } from '../types';
 import { Icon } from '../components/Icon';
+import { ConfirmSheet, Toast, useToast } from '../components/Sheet';
+import { RSeg } from '../components/Ribbon';
 import { listModels, testConnection, errMsg, type RemoteModel, type TestResult } from '../lib/ai-client';
 import { PROVIDER_PRESETS, contextBudget } from '../lib/models';
-import { downloadText, exportAll, getSettings, importAll, saveSettings } from '../lib/storage';
+import { applyTheme, clearAllData, downloadText, exportAll, getPrefs, getSettings, importAll, savePrefs, saveSettings, storageUsage } from '../lib/storage';
+import { isNative, tap } from '../lib/native';
+
+const CURRENCIES = ['$', '€', '£', '₹', '¥', '₩', 'R$', 'CHF ', 'A$', 'C$'];
+const DOC_FONTS = ['Calibri', 'Segoe UI', 'Arial', 'Times New Roman', 'Georgia', 'Cambria', 'Verdana', 'Roboto'];
 
 /** 1048576 -> "1M", 131072 -> "131K" - compact context-length for option labels. */
 function fmtCtx(n: number): string {
@@ -18,7 +24,18 @@ export default function Settings() {
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<TestResult | null>(null);
   const [error, setError] = useState('');
-  const [toast, setToast] = useState('');
+  const [toast, flash] = useToast();
+  const [prefs, setPrefs] = useState<AppPrefs>(() => getPrefs());
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [dataTick, setDataTick] = useState(0);
+  const usage = useMemo(() => storageUsage(), [dataTick]); // eslint-disable-line react-hooks/exhaustive-deps
+  const setPref = <K extends keyof AppPrefs>(k: K, v: AppPrefs[K]) => {
+    const next = { ...prefs, [k]: v };
+    setPrefs(next);
+    savePrefs(next);
+    if (k === 'theme') applyTheme(v as ThemeMode);
+    if (k === 'haptics' && v) void tap('medium');
+  };
   const [remote, setRemote] = useState<RemoteModel[] | null>(null);
   const [loadingModels, setLoadingModels] = useState(false);
   const [freeOnly, setFreeOnly] = useState(false);
@@ -65,11 +82,6 @@ export default function Settings() {
     } finally {
       setTesting(false);
     }
-  };
-
-  const flash = (msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(''), 3000);
   };
 
   const preset = PROVIDER_PRESETS[s.provider];
@@ -223,8 +235,36 @@ export default function Settings() {
       </section>
 
       <section className="card">
+        <h3><Icon name="theme" size={17} /> Appearance</h3>
+        <label className="field">
+          <span>Theme</span>
+          <RSeg value={prefs.theme} options={[{ v: 'system', t: 'System', icon: 'phone' }, { v: 'light', t: 'Light', icon: 'sun' }, { v: 'dark', t: 'Dark', icon: 'moon' }]} onChange={(v) => setPref('theme', v)} />
+        </label>
+        <label className="field">
+          <span>Default document view</span>
+          <RSeg value={prefs.docView} options={[{ v: 'mobile', t: 'Mobile (reflow)', icon: 'phone' }, { v: 'print', t: 'Print layout', icon: 'pageSize' }]} onChange={(v) => setPref('docView', v)} />
+        </label>
+        <label className="field">
+          <span>Default document font</span>
+          <select className="input" value={prefs.docFont} onChange={(e) => setPref('docFont', e.target.value)}>
+            {DOC_FONTS.map((f) => <option key={f} value={f} style={{ fontFamily: f }}>{f}</option>)}
+          </select>
+        </label>
+        <label className="field">
+          <span>Currency symbol (spreadsheets)</span>
+          <div className="chip-row">
+            {CURRENCIES.map((c) => <button key={c} className={`chip${prefs.currency === c ? ' on' : ''}`} onClick={() => setPref('currency', c)}>{c.trim()}</button>)}
+          </div>
+        </label>
+        <label className="field row">
+          <input type="checkbox" checked={prefs.haptics} onChange={(e) => setPref('haptics', e.target.checked)} />
+          <span>Haptic feedback on taps{isNative() ? '' : ' (Android app only)'}</span>
+        </label>
+      </section>
+
+      <section className="card">
         <h3><Icon name="database" size={17} /> Data</h3>
-        <p className="hint">Everything lives in on-device storage. Export a JSON backup to move devices.</p>
+        <p className="hint">Everything lives in on-device storage ({usage.docs} file{usage.docs === 1 ? '' : 's'}, {(usage.bytes / 1024).toFixed(0)} KB). Export a JSON backup to move devices — it includes your files, preferences and provider settings.</p>
         <div className="btn-row">
           <button
             className="btn"
@@ -245,7 +285,10 @@ export default function Settings() {
                 reader.onload = () => {
                   try {
                     const n = importAll(String(reader.result));
-                    flash(`Imported ${n} documents. Reload to see them.`);
+                    setDataTick((t) => t + 1);
+                    setPrefs(getPrefs());
+                    setS(getSettings());
+                    flash(`Imported ${n} document${n === 1 ? '' : 's'}.`);
                   } catch (err) {
                     flash(`Import failed: ${errMsg(err)}`);
                   }
@@ -254,19 +297,23 @@ export default function Settings() {
               }}
             />
           </label>
+          <button className="btn danger" onClick={() => setConfirmClear(true)}>Delete all files</button>
         </div>
       </section>
 
       <section className="card">
         <h3><Icon name="info" size={17} /> About</h3>
         <p className="hint">
-          GenOffice Mobile - the Android port of the GenOffice AI office suite. BYOK (bring your own
-          key) via OpenRouter or NVIDIA NIM. No account, no login, no telemetry. Documents stay on
+          GenOffice Mobile — the Android port of the GenOffice AI office suite: Word-, Excel- and PowerPoint-style
+          editors with real .docx / .xlsx / .pptx / PDF import & export, a 120-function formula engine and BYOK
+          (bring your own key) AI via OpenRouter or NVIDIA NIM. No account, no login, no telemetry. Documents stay on
           your device.
         </p>
+        <button className="btn small" onClick={() => setPref('onboarded', false)}>Show welcome tour again</button>
       </section>
 
-      {toast && <div className="toast">{toast}</div>}
+      <ConfirmSheet open={confirmClear} title="Delete all files on this device?" message="Documents, spreadsheets, presentations and chats will be removed. Your API key and preferences are kept. Export a backup first if you need one." confirmLabel="Delete everything" onConfirm={() => { clearAllData(); setDataTick((t) => t + 1); flash('All files deleted.'); }} onClose={() => setConfirmClear(false)} />
+      <Toast msg={toast} />
     </div>
   );
 }
