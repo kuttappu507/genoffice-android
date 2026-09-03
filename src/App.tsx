@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { DocKind } from './types';
 import { Icon } from './components/Icon';
 import Home from './screens/Home';
@@ -7,6 +7,9 @@ import Docs from './screens/Docs';
 import Sheets from './screens/Sheets';
 import Slides from './screens/Slides';
 import Settings from './screens/Settings';
+import Onboarding from './screens/Onboarding';
+import { applyTheme, getPrefs, onPrefsChange } from './lib/storage';
+import { onBack, setStatusBar } from './lib/native';
 
 type Tab = 'home' | 'chat' | 'docs' | 'sheets' | 'slides' | 'settings';
 
@@ -38,9 +41,53 @@ const TAB_FOR_KIND: Record<DocKind, Tab> = {
   deck: 'slides',
 };
 
+function isDarkNow(): boolean {
+  return document.documentElement.dataset.theme === 'dark';
+}
+
 export default function App() {
   const [tab, setTab] = useState<Tab>('home');
   const [target, setTarget] = useState<{ kind: DocKind; id: string } | null>(null);
+  const [onboarded, setOnboarded] = useState(() => getPrefs().onboarded);
+  const [, setThemeTick] = useState(0);
+
+  // Theme: apply on boot, follow prefs + OS changes.
+  useEffect(() => {
+    applyTheme(getPrefs().theme);
+    const off = onPrefsChange(() => {
+      applyTheme(getPrefs().theme);
+      setOnboarded(getPrefs().onboarded);
+      setThemeTick((t) => t + 1);
+    });
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const onMq = () => {
+      applyTheme(getPrefs().theme);
+      setThemeTick((t) => t + 1);
+    };
+    mq.addEventListener('change', onMq);
+    return () => {
+      off();
+      mq.removeEventListener('change', onMq);
+    };
+  }, []);
+
+  // Status bar colour follows the active app (editors paint their own bar).
+  const isEditor = EDITOR_TABS.includes(tab);
+  useEffect(() => {
+    if (isEditor) void setStatusBar(ACCENT[tab], true);
+    else void setStatusBar(isDarkNow() ? '#1b1b1f' : '#f5f5f5', isDarkNow());
+  });
+
+  // Hardware back: any non-home tab returns home; on home let Android minimise the app.
+  useEffect(() => {
+    return onBack(() => {
+      if (tab !== 'home') {
+        setTab('home');
+        return true;
+      }
+      return false;
+    });
+  }, [tab]);
 
   const openDoc = (kind: DocKind, id: string) => {
     setTarget({ kind, id });
@@ -48,13 +95,21 @@ export default function App() {
   };
 
   const keyFor = (kind: DocKind): string => (target?.kind === kind ? target.id : 'new');
-  const isEditor = EDITOR_TABS.includes(tab);
-  const exit = () => setTab('home');
+  const exit = () => {
+    setTarget(null);
+    setTab('home');
+  };
+  const go = (t: Tab) => {
+    if (EDITOR_TABS.includes(t) || t === 'chat') setTarget(null);
+    setTab(t);
+  };
+
+  if (!onboarded) return <Onboarding onDone={() => setOnboarded(true)} />;
 
   return (
     <div className="app" style={{ ['--accent' as string]: ACCENT[tab] }}>
       <main className={isEditor ? 'screen-area flush' : 'screen-area'}>
-        {tab === 'home' && <Home onOpen={openDoc} onGo={setTab} key="home" />}
+        {tab === 'home' && <Home onOpen={openDoc} onGo={go} key="home" />}
         {tab === 'chat' && <Chat initialId={target?.kind === 'chat' ? target.id : undefined} key={keyFor('chat')} />}
         {tab === 'docs' && <Docs initialId={target?.kind === 'doc' ? target.id : undefined} key={keyFor('doc')} onExit={exit} />}
         {tab === 'sheets' && <Sheets initialId={target?.kind === 'sheet' ? target.id : undefined} key={keyFor('sheet')} onExit={exit} />}
@@ -64,7 +119,7 @@ export default function App() {
       {!isEditor && (
         <nav className="tabbar">
           {TABS.map((t) => (
-            <button key={t.id} className={tab === t.id ? 'tab active' : 'tab'} onClick={() => setTab(t.id)}>
+            <button key={t.id} className={tab === t.id ? 'tab active' : 'tab'} onClick={() => go(t.id)}>
               <Icon name={t.icon} size={21} strokeWidth={tab === t.id ? 2.3 : 2} />
               <span>{t.label}</span>
             </button>

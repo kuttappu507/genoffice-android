@@ -17,12 +17,12 @@ No account. No login. No telemetry. Your API key and documents never leave your 
 
 | App | Features |
 | --- | --- |
-| **Home** | Office-hub launcher: create-new tiles with Word/Excel/PowerPoint icons, recent files, open-file banner |
+| **Home** | Office-hub launcher: create-new tiles with Word/Excel/PowerPoint icons, templates, recent + pinned files (rename / duplicate / delete), open-file banner, first-run onboarding, light / dark / system theme |
 | **AI Chat** | Streaming responses, any OpenAI-compatible model, collapsible thinking section, auto-trimmed history, stop button, multiple saved conversations |
-| **Docs** (Word-blue) | Blue app bar + Home/Insert/AI icon ribbon with live format states, font-color & highlight palette, white page canvas, open/edit **.docx** (mammoth), .txt, .md, .html; save as real **.docx**; AI continue/summarize/rewrite; autosave |
-| **Sheets** (Excel-green) | Green app bar, Name Box + fx formula bar, sticky A-Z / 1-60 headers with green selection + fill handle, Sheet1 tab strip; open/edit **.xlsx / .xls / .csv** (SheetJS) with formulas preserved; save as real **.xlsx** with live formulas + cached values; formula engine (`=A1+B2*2`, `SUM/AVERAGE/COUNT/MIN/MAX/ABS/ROUND`, ranges); AI table generation |
-| **Slides** (PPT-orange) | Orange app bar with present + save actions, 16:9 slide canvas with inline title/bullet editing, filmstrip with add/duplicate/delete/reorder; open **.pptx** (JSZip); save as real **.pptx** (pptxgenjs); fullscreen present mode; AI outline generation |
-| **Settings** | Provider switch (OpenRouter / NVIDIA NIM / custom), free-tier model presets, "Test connection" ping with latency, backup export/import |
+| **Docs** (Word-blue) | Home / Insert / Layout / Review / View ribbons with live format states; fonts, sizes, styles, colour + highlight palettes, super/subscript, lists, indents, alignment, line spacing; tables, images, links, page breaks, footnotes, table of contents, symbols; page setup (A4 / Letter / Legal, orientation, margins), headers / footers, page numbers; find & replace, comments, word count, spell-check toggle, reading + dark canvas view; open **.docx** / .txt / .md / .html, save as **.docx**, **.pdf**, **.md**, .html; AI continue / summarize / rewrite; autosave + undo |
+| **Sheets** (Excel-green) | Name Box + fx formula bar with function picker, sticky headers, frozen panes, multi-sheet tab strip; 75 functions (`SUM`, `IF`, `VLOOKUP`, `INDEX/MATCH`, `SUMIFS`, `TEXT`, dates, …) with cross-sheet references (`=Sheet2!A1`, `='My Sheet'!B2:B9`); number / currency / percent / date formats, bold / italic / colours / fills / borders / wrap / merge, column widths + row heights, sort, filter, find & replace, fill series, charts (column / bar / line / pie / area), cell notes, go-to; open **.xlsx / .xls / .csv / .ods** with formulas, styles, merges, widths and freeze panes; save real **.xlsx** (all sheets, live formulas, fonts / fills / borders / alignment / freeze panes) or **.csv**; AI table generation |
+| **Slides** (PPT-orange) | 16:9 canvas with shape-level editing (text, images, geometric shapes; move / resize, fill, line, font, alignment), 6 themes + layouts, background colours, speaker notes, transitions (fade / push / zoom / flip), slide sorter, filmstrip add / duplicate / delete / reorder; presenter mode with swipe, tap zones, timer, notes, laser pointer; open **.pptx** with positions / styles / images / notes; save as **.pptx**, **.pdf** or PNG; AI outline generation |
+| **Settings** | Provider switch (OpenRouter / NVIDIA NIM / custom), live model catalogue, "Test connection" ping with latency, theme, haptics, currency, default font, backup export / import, clear data |
 
 Everything is stored locally on the device (localStorage in the app sandbox). AI features need
 your own key:
@@ -36,17 +36,16 @@ Tap **Open file** on Home (or **Open** inside Docs / Sheets / Slides) and pick a
 
 | Format | Open | Save |
 | --- | --- | --- |
-| .docx | yes - converted to editable rich text | yes - real .docx (docx library) |
-| .xlsx / .xls / .csv | yes - first sheet, formulas kept | yes - real .xlsx with live formulas |
-| .pptx | yes - titles + bullets extracted | yes - real .pptx (pptxgenjs) |
-| .txt / .md / .html | yes | .docx / .html |
+| .docx | yes - headings, inline formatting, lists, tables, links, images, footnotes, page breaks, alignment | yes - real .docx (docx library) incl. headers / footers / page numbers |
+| .xlsx / .xls / .csv / .ods | yes - every sheet, formulas, number formats, fonts / fills / borders / alignment, merges, column widths, frozen panes | yes - real .xlsx with live formulas, cached values and cell styles; .csv |
+| .pptx | yes - shapes with positions, text runs, images, backgrounds, notes | yes - real .pptx (pptxgenjs); .pdf; .png |
+| .txt / .md / .html | yes | .docx / .pdf / .md / .html |
 
 On Android, saving opens the **system share sheet** so you can send the file to Drive, mail it,
 or store it anywhere. On desktop browsers it downloads directly. Parsing and writing happen
 entirely on-device; nothing is uploaded.
 
-Sample files to try: `download/genoffice-ui/samples/sample.docx|xlsx|pptx` in this project
-(regenerable via `node scripts/make-samples.mjs`).
+Sample files to try: run `node scripts/make-samples.mjs` to generate `samples/sample.docx / .xlsx / .pptx`.
 
 ## Built-in token savings (free-tier friendly)
 
@@ -83,6 +82,7 @@ and uploads it as an artifact. Or trigger it manually from the **Actions** tab
 
 ```bash
 npm install
+npm test               # formula engine, sheet model, docx/xlsx/pptx round-trip checks (Node only)
 npm run build          # type-check + vite build into dist/
 npx cap add android    # only needed once; the repo may already contain android/
 npx cap sync android
@@ -98,27 +98,41 @@ The debug APK ends up at `android/app/build/outputs/apk/debug/app-debug.apk`.
 ```
 src/
   main.tsx            entry point
-  App.tsx             shell: icon bottom nav, per-screen Office accent, full-screen editors
+  App.tsx             shell: icon bottom nav, per-screen Office accent, full-screen editors, back-button handling
   types.ts            shared types
   components/
     Icon.tsx          stroke SVG icon set + Office file-type icons (W/X/P)
+    Ribbon.tsx        Office-mobile ribbon primitives (tabs, groups, buttons, steppers, palettes)
+    Sheet.tsx         bottom sheets, menus, prompts, toasts
+    ChartView.tsx     SVG charts for Sheets
+    FunctionPicker.tsx  searchable function catalogue for the formula bar
+    SlideView.tsx     slide renderer (canvas, thumbnails, presenter, PNG/PDF export)
   lib/
     ai-client.ts      BYOK streaming client: SSE, think-strip, 429 backoff, test ping
     models.ts         provider presets, free-tier model list, context budgets
-    storage.ts        local document store, settings, backup export/import
-    formulas.ts       spreadsheet formula engine
+    storage.ts        local document store, prefs, theme, backup export/import
+    native.ts         Capacitor glue: haptics, status bar, back button, share, keep-awake
+    formulas.ts       spreadsheet formula engine (75 functions, cross-sheet refs)
+    sheet-model.ts    workbook model: styles, merges, freeze, filter, charts, structural edits, templates
+    deck-model.ts     slide model: themes, layouts, shapes, outline -> deck
+    fileio.ts         .docx / .xlsx / .pptx / .pdf / .md import + export
+    xlsx-styles.ts    cell-style + freeze-pane round trip for .xlsx (patches OOXML parts)
     markdown.tsx      tiny markdown renderer for chat answers
   screens/            one file per app screen (Office-mobile style)
+scripts/
+  test-formulas.mjs   formula engine checks
+  test-sheet-model.mjs  cross-sheet evaluation, structural edits, CSV
+  test-io.mjs         docx / xlsx / pptx export -> import round trips (jsdom)
+  test-pptx-shapes.mjs  shape-level pptx import/export
 android/              native Android shell (Capacitor)
-.github/workflows/    APK build CI
+.github/workflows/    tests + APK build CI
 ```
 
 ## Roadmap
 
-- PDF viewer (pdf.js)
-- More ribbon tabs (Layout, Review) and full font controls (size, family)
-- Multi-sheet workbooks
+- PDF viewer (pdf.js) for opening existing PDFs
 - Open password-protected Office files
+- Conditional formatting and pivot-style summaries in Sheets
 - Release signing + Play Store pipeline
 - iOS target from the same code base (`npx cap add ios`)
 - Optional sync of the desktop fork's document format

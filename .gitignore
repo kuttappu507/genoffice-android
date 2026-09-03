@@ -18,3 +18,7 @@ android/app/src/main/assets/public/
 # local test artifacts
 shots/
 scripts/fileio-bundle.mjs
+scripts/.fileio-bundle.mjs
+scripts/.deck-bundle.mjs
+.shots/
+samples/
