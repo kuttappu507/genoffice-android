@@ -2,7 +2,8 @@
 import * as fs from 'node:fs';
 import path from 'node:path';
 
-const OUT = '/home/z/my-project/download/genoffice-ui/samples';
+// usage: node scripts/make-samples.mjs [outDir]   (default: ./samples, git-ignored)
+const OUT = path.resolve(process.argv[2] ?? 'samples');
 fs.mkdirSync(OUT, { recursive: true });
 
 // ---- sample .docx ----

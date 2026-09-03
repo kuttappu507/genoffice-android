@@ -9,7 +9,29 @@
  */
 import { buildPptx } from './synthetic-pptx.mjs';
 
-const { importPptx, exportPptx } = await import('./fileio-bundle.mjs');
+import { build } from 'esbuild';
+import { unlinkSync } from 'node:fs';
+import path from 'node:path';
+
+// Bundle src/lib/fileio.ts for Node. The pptx code paths only need DOMParser/XMLSerializer,
+// which we provide through a small shim (linkedom) when running outside the browser.
+const bundle = path.resolve('scripts/.fileio-bundle.mjs'); // inside the repo so bare imports (pptxgenjs, xlsx…) resolve from node_modules
+process.on('exit', () => { try { unlinkSync(bundle); } catch {} });
+await build({
+  entryPoints: ['src/lib/fileio.ts'],
+  bundle: true,
+  format: 'esm',
+  platform: 'node',
+  outfile: bundle,
+  logLevel: 'silent',
+  external: ['react', 'react-dom/client', '../components/SlideView', 'html2canvas', 'jspdf', 'docx', 'mammoth', 'xlsx', 'pptxgenjs', 'jszip', '@capacitor/*'],
+  alias: { '@capacitor/core': path.resolve('scripts/shims/capacitor-core.mjs'), '@capacitor/filesystem': path.resolve('scripts/shims/capacitor-core.mjs') },
+});
+if (typeof globalThis.DOMParser === 'undefined') {
+  const { DOMParser, XMLSerializer } = await import('@xmldom/xmldom').catch(() => ({}));
+  if (DOMParser) { globalThis.DOMParser = DOMParser; globalThis.XMLSerializer = XMLSerializer; }
+}
+const { importPptx, exportPptx } = await import(bundle);
 
 let failures = 0;
 function check(name, cond, detail = '') {
